@@ -52,20 +52,28 @@ complete system architecture. The phone transport is a settled input from
 - **Host adapters:** own platform audio routing, permissions, lifecycle, and BLE API
   behavior. They translate those events into the versioned transport and safety model
   without making platform callbacks or framework types part of the device protocol.
-- **Control core:** owns protocol state, watchdogs, PTT arbitration, and radio profile.
+- **Control core:** owns protocol state, session identity, the monotonic PTT lease and
+  continuous-transmit deadline, safety-service watchdog, fault lockout, and radio
+  profile.
 - **CAT adapter:** converts versioned host operations or safe passthrough into the
   radio's documented CAT protocol.
 - **Audio front end:** performs DC blocking, attenuation/gain, filtering, protection,
   and any required isolation.
-- **PTT path:** independent fail-open output with explicit ownership and timeout.
+- **PTT path:** independent normally open output with passive receive bias, physical
+  series TX inhibit, and radio-side actual-output sensing. Firmware is its sole
+  RigTether owner; CAT and audio cannot key the transmitter.
 - **Harness:** owns radio connector fan-out, shielding, strain relief, and optional
   identification.
 
 ## Invariants that architecture must preserve
 
 - No transmit on boot, reset, firmware update, host disconnect, or watchdog expiry.
-- Audio output alone must not unexpectedly assert PTT unless an explicitly selected
-  and bounded VOX mode exists.
+- Every PTT assertion obeys
+  [ADR 0004](decisions/0004-bound-transmit-authority-with-device-enforced-leases.md):
+  one session-scoped firmware lease, 500 ms maximum renewal interval, 60 s continuous
+  cap, independent inhibit, and sensed output.
+- Audio output alone cannot assert PTT. A future VOX mode requires a new safety
+  decision and explicit arbitration with hardware PTT.
 - Radio-specific pin assignments never appear as generic host API guarantees.
 - Apple framework types, callback ordering, background execution, and audio-session
   behavior never become device-side protocol guarantees.
@@ -84,8 +92,10 @@ ADR 0003 fixes only the boundary needed by architecture and protocol work:
 - The BLE service exposes a discoverable service identity, protocol version and
   capabilities, a reliable command/response path, asynchronous status including the
   actual PTT output, and explicit connection/session identity.
-- Every transmit request is a bounded lease enforced by the interface. Loss of BLE,
-  expiry, reset, malformed input, or a new session returns the interface to receive.
+- Every transmit request is a bounded lease enforced by the interface according to
+  ADR 0004. Loss of BLE, expiry, reset, malformed input, a new session, or a
+  control/audio safety fault returns the controllable output to receive; stale or
+  duplicate messages cannot extend or restore authority.
 - Message boundaries and sizes respect the negotiated GATT/ATT limits. The v0 protocol
   issue owns payloads, characteristic layout, ordering, errors, and test vectors.
 - The iOS app may use the documented audio and `bluetooth-central` background modes
@@ -104,7 +114,6 @@ power are explicit M1 measurements rather than assumed properties.
 - What exact voltage, impedance, bias, grounding, and timing requirements apply to KX2
   and KX3 ports?
 - Should the protocol expose raw CAT, typed capabilities, or both?
-- Which safety functions must be hardware-enforced rather than firmware-enforced?
 
 The M0 architecture decision closes these questions enough to authorize the bench
 proof; it need not settle production component choices.
