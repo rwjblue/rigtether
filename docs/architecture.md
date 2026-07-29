@@ -56,14 +56,17 @@ complete system architecture. The phone transport is a settled input from
   continuous-transmit deadline, safety-service watchdog, fault lockout, and radio
   profile.
 - **CAT adapter:** converts versioned host operations or safe passthrough into the
-  radio's documented CAT protocol.
+  radio's documented CAT protocol. For M1 it implements the bounded typed allowlist in
+  the [KX2/KX3 interface specification](elecraft-kx2-kx3-interface.md); raw CAT and
+  every CAT keying command are excluded.
 - **Audio front end:** performs DC blocking, attenuation/gain, filtering, protection,
   and any required isolation.
 - **PTT path:** independent normally open output with passive receive bias, physical
   series TX inhibit, and radio-side actual-output sensing. Firmware is its sole
   RigTether owner; CAT and audio cannot key the transmitter.
 - **Harness:** owns radio connector fan-out, shielding, strain relief, and optional
-  identification.
+  identification. KX2 and KX3 remain distinct profiles, and an active profile
+  populates exactly one hardware PTT path.
 
 ## Invariants that architecture must preserve
 
@@ -111,9 +114,14 @@ power are explicit M1 measurements rather than assumed properties.
 - Which USB Audio Class topology and sample formats should the M1 hardware expose?
 - Which conservative descriptor and format choices preserve Android USB Audio host
   interoperability without weakening the iPhone proof?
-- What exact voltage, impedance, bias, grounding, and timing requirements apply to KX2
-  and KX3 ports?
-- Should the protocol expose raw CAT, typed capabilities, or both?
+- The KX2/KX3 source study now identifies every published limit and every
+  measurement-required voltage, impedance, bias, grounding, insertion, and timing
+  value. Issue #5 allocates the profile and validation boundaries without inventing
+  those values; issue #13 supplies physical evidence before dependent bench-circuit
+  choices are fixed.
+- M1 exposes typed CAT capabilities only. The exact allowlist and response forms are
+  fixed by the KX2/KX3 interface specification; adding raw CAT is a later owner and
+  safety decision.
 
 The M0 architecture decision closes these questions enough to authorize the bench
 proof; it need not settle production component choices.

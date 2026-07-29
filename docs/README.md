@@ -5,6 +5,7 @@
 - [Product contract](product.md)
 - [Architecture hypothesis](architecture.md)
 - [Hardware and transmit safety](hardware-safety.md)
+- [Elecraft KX2/KX3 radio interfaces](elecraft-kx2-kx3-interface.md)
 - [Interoperability targets](interoperability.md)
 - [Roadmap](roadmap.md)
 - [Work tracking](work-tracking.md)
