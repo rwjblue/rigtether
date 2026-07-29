@@ -26,7 +26,7 @@ choices. The files under `planning/` reproduce the initial seed only.
 
 `agent-ready` is readiness, not authorization. Explicit user handoff starts work.
 
-## Initial dependency order
+## Milestone dependency order
 
 Three M0 issues may proceed independently:
 
@@ -37,8 +37,14 @@ Three M0 issues may proceed independently:
 Their results unblock the system architecture. Architecture then unblocks the v0
 protocol. The owner review closes M0 and authorizes M1 implementation.
 
-M1 implementation issues are intentionally prewritten but not agent-ready. Their
-contracts must be reassessed against the accepted M0 decisions before handoff.
+M1 implementation issues were intentionally prewritten and withheld from
+`agent-ready` pending owner review. Their contracts must be reassessed against the
+accepted M0 decisions before handoff.
+
+The owner approved M0 in issue #7 on 2026-07-29. After reassessment, the bounded CAT
+core in #9 and bench-platform decision in #10 are the first agent-ready M1 contracts.
+Other M1 work remains dependency-gated, and issues #13, #15, and #18 retain their
+`human-required` evidence boundaries.
 
 ## Completion evidence
 

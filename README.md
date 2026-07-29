@@ -49,10 +49,11 @@ has to prove exact audio formats, coexistence, latency, reconnect behavior, and 
 > firmware, app, cable, or safe-to-build hardware release. Do not order boards or
 > connect unpublished circuits to a radio.
 
-The current work is limited to establishing the product contract, iPhone transport,
-cross-host portability constraints, Elecraft electrical requirements, transmit-safety
-invariants, system architecture, and an initial control protocol. See the
-[roadmap](docs/roadmap.md) and
+The owner-approved M0 baseline fixes the product contract, iPhone transport,
+cross-host portability constraints, source-backed Elecraft interface requirements,
+transmit-safety invariants, system architecture, and v0 control protocol. Current M1
+work is an instrumentable end-to-end bench proof; it is not a production hardware
+release. See the [roadmap](docs/roadmap.md) and
 [work-tracking guide](docs/work-tracking.md).
 
 ## Initial success criterion
@@ -81,10 +82,11 @@ KX3 interoperability is a required validation target, not an assumption.
 
 ## Starting work
 
-The iPhone transport decision is recorded in
-[ADR 0003](docs/decisions/0003-usb-audio-plus-ble-control.md). The independent
-KX2/KX3 interface and transmit-safety decisions remain M0 work; their GitHub issues
-require explicit handoff before work begins.
+The owner approved the complete M0 baseline in
+[issue #7](https://github.com/rwjblue/rigtether/issues/7). The first independently
+agent-ready M1 contracts are the transcript-tested Elecraft CAT core and the bounded
+bench-platform decision. Physical phone, radio, cable, electrical, and RF evidence
+remains human-required.
 
 After the repository is published, the GitHub issue queue is the durable source of
 truth. See [Agent kickoff](docs/agent-kickoff.md) for a handoff prompt.
