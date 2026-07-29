@@ -44,6 +44,10 @@ defines the M1 radio-side contract and the measurements that still require a hum
   termination, and wireless interference close to the USB-C cable.
 - A connected audio route is not proof of a healthy control link. A connected BLE link
   is not proof that audio is routed correctly.
+- The normative [v0 control contract](../protocol/README.md) uses runtime-sized GATT
+  fragmentation and host-neutral JSON messages. It reports host-route, device-audio,
+  BLE-link, and protocol-session health separately and exposes typed CAT and
+  device-monotonic PTT lease semantics without Apple framework fields.
 - [ADR 0005](decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md)
   assigns AVFAudio and Core Bluetooth behavior to the iOS adapter, keeps protocol and
   safety semantics host-neutral, and gives USB media and BLE control separate owners,

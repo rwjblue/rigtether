@@ -40,8 +40,9 @@ receive-safe. The independent physical TX inhibit is the required recovery bound
 
 ## Transmit ownership and lease contract
 
-These semantics are protocol requirements. Issue #6 owns their wire representation,
-not their meaning.
+These semantics are protocol requirements. The
+[v0 control contract](../protocol/README.md) owns their wire representation, not their
+meaning.
 
 ### Identity and authority
 
@@ -173,8 +174,8 @@ means the last renewal accepted by firmware, not sent by the host.
 | USB detach, route loss, or required transmit-audio fault | Release within `T_RELEASE_MAX` after detection and never later than lease expiry plus `T_RELEASE_MAX`; mute audio | Firmware health state and lease | Exact route-loss detection latency is an M1 measurement |
 | BLE/control loss or radio interference | No renewal means release no later than 600 ms after the last accepted renewal | Firmware lease | Bluetooth supervision loss may be slower and is not the bound |
 | App suspension, termination, crash, or force quit | Host stops when able; device releases within the lease bound without requiring a callback | Firmware lease; host defense in depth | Platform may not deliver a final lifecycle callback |
-| Stale, delayed, wrong-session, or post-reconnect command | Never assert or revive PTT; current-channel identity/ordering fault releases and locks out | Firmware identities and sequencing | Protocol encoding and test vectors belong to #6 |
-| Exact duplicate command | Return cached result; do not extend a deadline or repeat a transition | Firmware idempotency cache | Cache size and command identifier width belong to #6 |
+| Stale, delayed, wrong-session, or post-reconnect command | Never assert or revive PTT; current-channel identity/ordering fault releases and locks out | Firmware identities and sequencing | The v0 contract fixes strict JSON, ordered identities, and machine-readable vectors |
+| Exact duplicate command | Return cached result; do not extend a deadline or repeat a transition | Firmware idempotency cache | The v0 contract fixes 128-bit operation identities and a non-evicting session cache |
 | Stuck host renewal loop | Hard release at 60 s plus 100 ms; lock out until release intent, 1 s safe interval, and new operator action | Firmware continuous cap | Firmware cannot prove a host event was genuinely human; physical inhibit remains final authority |
 | Radio-profile change or harness identity change | Release and mute first; invalidate session and lease; validate new profile before acquire | Firmware state machine | Harness identity mechanism is not yet selected |
 | Firmware-update request, bootloader entry, or failed update | Reject update while output is sensed active; otherwise enter update with inhibit active and PTT passively inactive | Hardware bias; bootloader and firmware | Bootloader and rollback behavior need implementation evidence |
@@ -244,9 +245,10 @@ Sources were accessed 2026-07-29.
   inhibit, and output health to explicit owners. Issue #10 must select the
   hardware-dependent audio-health thresholds and prove the timing path from detected
   fault to the safety service.
-- Issue #6 must define encoding, identifier widths, session establishment,
-  acknowledgement, errors, status fields, and conformance vectors without weakening
-  these semantics.
+- The [v0 control contract](../protocol/README.md) defines strict JSON encoding,
+  runtime GATT fragmentation, 128-bit identities, session establishment,
+  acknowledgement, errors, status fields, and
+  [conformance vectors](../protocol/vectors/v0.json) without changing these semantics.
 - Issue #13 must validate inactive bias, reset/brownout behavior, watchdog release,
   lease timing, continuous cap, output sensing, inhibit independence, loading,
   protection, and the stuck-active fixture fault.

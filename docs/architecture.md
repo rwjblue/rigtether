@@ -66,7 +66,7 @@ or request behavior only through the named boundary.
 | Platform-neutral host core | Host library contract | Owns device discovery state, capability negotiation, session establishment, ordered operations, typed radio operations, status reduction, and the 250 ms lease-renewal target. It stops renewing on intent, route, lifecycle, or control uncertainty. Firmware deadlines remain the safety guarantee. |
 | USB Audio function | Device USB/audio firmware | Exposes class-compliant full-duplex media and reports device-observed configuration, stream, clock, and buffer health to the audio service. It carries no control or PTT meaning. |
 | BLE transport adapter | Device BLE firmware | Exposes the RigTether GATT service, negotiates ATT limits, and moves bounded protocol messages. BLE connection state alone is neither a session nor transmit authority. |
-| Protocol and session core | Host-neutral device firmware plus the v0 contract | Owns version/capability negotiation, session replacement, operation ordering/idempotency, typed commands, status and errors. It publishes and validates the current `boot_id` supplied by the boot/update coordinator but never creates or rotates it. Issue #6 owns its wire representation and vectors. |
+| Protocol and session core | Host-neutral device firmware plus the [v0 contract](../protocol/README.md) | Owns version/capability negotiation, session replacement, operation ordering/idempotency, typed commands, status and errors. It publishes and validates the current `boot_id` supplied by the boot/update coordinator but never creates or rotates it. The contract owns its wire representation and vectors. |
 | Audio service | Device audio firmware | Owns media routing between USB and the conversion boundary, sample-format conversion, gain/mute control, and device-observed transmit-audio health. Silence is valid media; stream/clock/buffer failure is not. It can require release but cannot assert PTT. |
 | Audio conversion boundary | Replaceable bench hardware plus its driver | Owns codec or converter attachment, DC blocking, filtering, bounded gain/attenuation, protection, and loopback/test access. Exact implementation and formats belong to #10 and measured radio values to #13. |
 | Radio service | Host-neutral firmware | Owns the selected radio profile, harness validation state, typed CAT adapter, and mapping of generic capabilities to KX2/KX3 behavior. It can deny or release PTT but cannot energize it directly. |
@@ -111,7 +111,7 @@ USB media and BLE control have separate state machines and diagnostics.
 | Host audio route health | Platform adapter, from current route and lifecycle certainty | Loss stops host renewals and is reported to the device when possible; device safety never waits for that report | Host-adapter unit tests with synthetic route/lifecycle events; iOS probe route-change tests in #11/#18 |
 | Device USB media health | USB audio function and audio service, from configured state, active transmit stream, valid clocks, and bounded buffer/codec faults | Required for acquire and renewal; detected loss releases within `T_RELEASE_MAX` and mutes TX audio | Firmware fault injection for detach, clock loss, underrun/overrun, converter fault, and mute; USB loopback in #12/#18 |
 | BLE link health | BLE transport adapter | Explicit disconnect immediately invalidates the session and releases; silent loss is still bounded by lease expiry | Simulated disconnect, blocked traffic, supervision delay, and reconnect; lease timing remains independent |
-| Protocol session health | Protocol/session core, from negotiated current session and ordered valid traffic | Wrong-session, malformed, altered duplicate, or ordering fault cannot assert and releases/locks out as ADR 0004 requires | Platform-neutral protocol vectors and two independent implementations in #6 |
+| Protocol session health | Protocol/session core, from negotiated current session and ordered valid traffic | Wrong-session, malformed, altered duplicate, or ordering fault cannot assert and releases/locks out as ADR 0004 requires | Platform-neutral [protocol vectors](../protocol/vectors/v0.json) and independent implementations |
 | CAT/profile health | Radio service, from profile validation and typed CAT results | Invalid profile or CAT uncertainty denies acquire; an active safety-relevant fault releases without waiting for CAT | Radio-disconnected profile tests plus CAT transcript simulator in #9 |
 | Inhibit and output health | PTT safety service, from hardware inputs | Inhibit denies assertion; commanded/sensed mismatch releases, latches, and reports `FAULT_LOCKOUT` | Radio-disconnected electrical fixture and forced faults in #13 |
 
@@ -148,11 +148,22 @@ exposes it as immutable boot context. The safety service consumes that value as 
 every lease-owner tuple. The protocol/session core publishes it and rejects mismatches;
 neither component creates, rotates, or independently caches a different boot epoch.
 
+The normative [v0 control contract](../protocol/README.md) and
+[ADR 0006](decisions/0006-use-framed-json-for-the-v0-control-contract.md) fix the M1
+wire boundary. Logical messages are strict UTF-8 JSON. BLE uses runtime-sized
+fragmentation across read-only hello, command, indicated response, and snapshot-status
+characteristics. The protocol creates a fresh device-side session, enforces ordered
+operations with non-evicting exact-duplicate results, and exposes all safety times only
+on the device monotonic clock. A future USB MIDI adapter reuses logical messages but
+does not inherit GATT framing.
+
 For M1, session normalization sends and verifies `AI0`, `K20`, and `K30`. The typed CAT
 surface is `OM` identification/options, `RVM` and optional `RVD` firmware reads, `FA`
 read and query-verified set, plus read-only `IF`, `MD`, and `TQ`. The complete response,
 model, fixed fields, and product-specific values are validated. Timeout, `?;`,
 malformed, unsolicited, mismatched, or inconsistent results are explicit faults.
+The v0 protocol names these as typed operations and contains no raw CAT field. Unknown,
+unsupported, or keying-capable radio operations are rejected before radio I/O.
 
 KX2 and KX3 use replaceable harnesses and distinct profiles even when a documented
 command or connector is similar. KX3 may compare measured mic PTT with
@@ -302,7 +313,7 @@ Loopback and fixture support includes:
 | Android path preservation | Build or parse fixtures with a non-Swift harness; compare #10 descriptors/formats with the Android UAC1 baseline; escalate any exception |
 | USB Audio transport and conversion | Descriptor inspection, enumeration records, independent detach/clock/buffer fault injection, digital/analog loopback, format conversion and mute tests |
 | BLE transport | Second GATT implementation or simulator, negotiated-size boundaries, blocked traffic, disconnect/reconnect, duplicate and ordering faults |
-| Protocol/capabilities | Version/capability/session vectors from #6 consumed independently by Swift and Rust or another host-neutral harness |
+| Protocol/capabilities | [Version/capability/session vectors](../protocol/vectors/v0.json) consumed independently by Swift and the platform-neutral harness |
 | CAT allowlist | Parser/encoder unit tests, forbidden-command pre-I/O checks, KX2/KX3 transcript replay, timeout and malformed-response injection from #9 |
 | Profiles and harnesses | Configuration-schema tests, exactly-one-PTT assertion, unknown-value preservation, wrong/ambiguous profile denial, passive breakout continuity checks |
 | Lease clock and continuous cap | Virtual monotonic-clock tests plus timestamped fixture traces at 500 ms lease, 100 ms release, 60 s cap, and 1 s rearm bounds |
