@@ -5,9 +5,10 @@ project still contains unresolved architecture and safety choices.
 
 ## Recommended first handoff
 
-Choose one of the M0 issues carrying `agent-ready`. The iPhone transport decision is a
-good first choice because it constrains the host architecture without requiring physical
-radio access.
+Choose an open issue carrying `agent-ready` and confirm its dependencies are closed.
+The iPhone transport decision has landed; do not reopen it without new contradictory
+evidence. The GitHub queue reflects which remaining M0 decision or implementation work
+is actually ready.
 
 Example prompt:
 

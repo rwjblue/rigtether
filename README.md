@@ -35,10 +35,10 @@ phone or tablet
 Elecraft KX2 / KX3 first
 ```
 
-The leading feasibility hypothesis is standards-compliant USB audio for the audio
-path and Bluetooth Low Energy for control, but that transport split is deliberately
-**not yet an accepted architecture**. The first milestone exists to resolve it using
-current platform documentation and small proofs rather than assumption.
+The accepted feasibility transport is standards-compliant USB Audio Class for
+bidirectional audio plus Bluetooth Low Energy GATT for control. The USB-C cable is the
+only physical phone tether; BLE adds no second cable. Current-device validation still
+has to prove exact audio formats, coexistence, latency, reconnect behavior, and power.
 
 ## Project status
 
@@ -78,11 +78,10 @@ KX3 interoperability is a required validation target, not an assumption.
 
 ## Starting work
 
-Three independent M0 decisions are intentionally ready for explicit agent handoff:
-
-1. choose the iPhone control transport;
-2. document KX2/KX3 audio, CAT, and PTT requirements; and
-3. define transmit-safety invariants and failure behavior.
+The iPhone transport decision is recorded in
+[ADR 0003](docs/decisions/0003-usb-audio-plus-ble-control.md). The independent
+KX2/KX3 interface and transmit-safety decisions remain M0 work; their GitHub issues
+require explicit handoff before work begins.
 
 After the repository is published, the GitHub issue queue is the durable source of
 truth. See [Agent kickoff](docs/agent-kickoff.md) for a handoff prompt.
