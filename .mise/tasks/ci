@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the complete repository verification gate"
+set -euo pipefail
+mise run check

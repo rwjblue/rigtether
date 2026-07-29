@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Validate repository metadata, docs, and planning manifests"
+set -euo pipefail
+python3 tools/check_repo.py

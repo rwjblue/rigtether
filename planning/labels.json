@@ -1,0 +1,77 @@
+[
+  {
+    "name": "enhancement",
+    "color": "A2EEEF",
+    "description": "Product, infrastructure, documentation, or validation work"
+  },
+  {
+    "name": "agent-ready",
+    "color": "0E8A16",
+    "description": "Bounded, unblocked, and ready for explicit agent handoff"
+  },
+  {
+    "name": "in-progress",
+    "color": "FBCA04",
+    "description": "Actively owned by an agent or maintainer"
+  },
+  {
+    "name": "decision",
+    "color": "B60205",
+    "description": "Research and record a bounded technical choice"
+  },
+  {
+    "name": "tracking",
+    "color": "5319E7",
+    "description": "Parent map for a milestone or major workstream"
+  },
+  {
+    "name": "needs-decision",
+    "color": "D93F0B",
+    "description": "Blocked on a product, architecture, or owner choice"
+  },
+  {
+    "name": "human-required",
+    "color": "000000",
+    "description": "Completion needs owner action, credentials, or physical evidence"
+  },
+  {
+    "name": "validation",
+    "color": "1D76DB",
+    "description": "Bench, device, safety, or interoperability evidence"
+  },
+  {
+    "name": "area:product",
+    "color": "C5DEF5",
+    "description": "Product contract, roadmap, and milestone scope"
+  },
+  {
+    "name": "area:ios",
+    "color": "D4C5F9",
+    "description": "iOS application and Swift host library"
+  },
+  {
+    "name": "area:firmware",
+    "color": "BFDADC",
+    "description": "Embedded firmware and radio profiles"
+  },
+  {
+    "name": "area:hardware",
+    "color": "F9D0C4",
+    "description": "Electronics, harnesses, PCB, and mechanics"
+  },
+  {
+    "name": "area:protocol",
+    "color": "C2E0C6",
+    "description": "Host/device and radio-control contracts"
+  },
+  {
+    "name": "area:tooling",
+    "color": "FEF2C0",
+    "description": "Simulators, fixtures, automation, and developer tooling"
+  },
+  {
+    "name": "area:docs",
+    "color": "0075CA",
+    "description": "Maintained documentation"
+  }
+]

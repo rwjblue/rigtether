@@ -1,0 +1,344 @@
+{
+  "repository": "rwjblue/rigtether",
+  "description": "Open hardware and software for a portable phone-to-radio audio, CAT, and PTT interface.",
+  "topics": [
+    "amateur-radio",
+    "ham-radio",
+    "open-hardware",
+    "ios",
+    "usb-audio",
+    "bluetooth-le",
+    "elecraft",
+    "rust",
+    "kicad"
+  ],
+  "issues": [
+    {
+      "id": "m0-track",
+      "title": "Track M0: feasibility and architecture",
+      "kind": "tracking",
+      "body_file": "planning/issues/m0-track.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "tracking",
+        "area:product"
+      ],
+      "depends_on": [],
+      "parent": null,
+      "children": [
+        "m0-transport",
+        "m0-elecraft",
+        "m0-safety",
+        "m0-architecture",
+        "m0-protocol",
+        "m0-review"
+      ]
+    },
+    {
+      "id": "m0-transport",
+      "title": "Decision: choose the iPhone control transport for the feasibility prototype",
+      "kind": "decision",
+      "body_file": "planning/issues/m0-transport.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "decision",
+        "agent-ready",
+        "area:ios",
+        "area:protocol"
+      ],
+      "depends_on": [],
+      "parent": "m0-track",
+      "children": []
+    },
+    {
+      "id": "m0-elecraft",
+      "title": "Document KX2 and KX3 audio, CAT, and PTT interface requirements",
+      "kind": "decision",
+      "body_file": "planning/issues/m0-elecraft.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "decision",
+        "agent-ready",
+        "area:hardware",
+        "area:protocol"
+      ],
+      "depends_on": [],
+      "parent": "m0-track",
+      "children": []
+    },
+    {
+      "id": "m0-safety",
+      "title": "Decision: define transmit-safety invariants and failure behavior",
+      "kind": "decision",
+      "body_file": "planning/issues/m0-safety.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "decision",
+        "agent-ready",
+        "area:hardware",
+        "area:firmware",
+        "area:protocol"
+      ],
+      "depends_on": [],
+      "parent": "m0-track",
+      "children": []
+    },
+    {
+      "id": "m0-architecture",
+      "title": "Decision: define the feasibility architecture and component boundaries",
+      "kind": "decision",
+      "body_file": "planning/issues/m0-architecture.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "decision",
+        "area:product",
+        "area:hardware",
+        "area:firmware",
+        "area:ios"
+      ],
+      "depends_on": [
+        "m0-transport",
+        "m0-elecraft",
+        "m0-safety"
+      ],
+      "parent": "m0-track",
+      "children": []
+    },
+    {
+      "id": "m0-protocol",
+      "title": "Define the RigTether v0 control protocol contract",
+      "kind": "implementation",
+      "body_file": "planning/issues/m0-protocol.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "enhancement",
+        "area:protocol",
+        "area:firmware",
+        "area:ios"
+      ],
+      "depends_on": [
+        "m0-transport",
+        "m0-safety",
+        "m0-architecture"
+      ],
+      "parent": "m0-track",
+      "children": []
+    },
+    {
+      "id": "m0-review",
+      "title": "Human review: approve the M0 feasibility baseline",
+      "kind": "human",
+      "body_file": "planning/issues/m0-review.md",
+      "milestone": "M0: Feasibility and architecture",
+      "labels": [
+        "human-required",
+        "area:product"
+      ],
+      "depends_on": [
+        "m0-architecture",
+        "m0-protocol"
+      ],
+      "parent": "m0-track",
+      "children": []
+    },
+    {
+      "id": "m1-track",
+      "title": "Track M1: end-to-end bench proof",
+      "kind": "tracking",
+      "body_file": "planning/issues/m1-track.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "tracking",
+        "area:product",
+        "validation"
+      ],
+      "depends_on": [
+        "m0-review"
+      ],
+      "parent": null,
+      "children": [
+        "m1-cat-core",
+        "m1-platform",
+        "m1-ios-probe",
+        "m1-control-fw",
+        "m1-bench-interface",
+        "m1-integrate",
+        "m1-validate"
+      ]
+    },
+    {
+      "id": "m1-cat-core",
+      "title": "Implement an Elecraft CAT core and transcript fixtures",
+      "kind": "implementation",
+      "body_file": "planning/issues/m1-cat-core.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "enhancement",
+        "area:firmware",
+        "area:tooling",
+        "area:protocol"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m0-elecraft",
+        "m0-architecture"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m1-platform",
+      "title": "Decision: select the bench-prototype MCU and audio strategy",
+      "kind": "decision",
+      "body_file": "planning/issues/m1-platform.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "decision",
+        "area:hardware",
+        "area:firmware"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m0-transport",
+        "m0-architecture"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m1-ios-probe",
+      "title": "Build the minimal iOS audio and control probe application",
+      "kind": "implementation",
+      "body_file": "planning/issues/m1-ios-probe.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "enhancement",
+        "area:ios",
+        "area:protocol"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m0-transport",
+        "m0-protocol"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m1-control-fw",
+      "title": "Implement prototype control firmware on the selected development hardware",
+      "kind": "implementation",
+      "body_file": "planning/issues/m1-control-fw.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "enhancement",
+        "area:firmware",
+        "area:protocol"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m0-protocol",
+        "m1-cat-core",
+        "m1-platform"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m1-bench-interface",
+      "title": "Build and document the bench audio and PTT interface",
+      "kind": "implementation",
+      "body_file": "planning/issues/m1-bench-interface.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "enhancement",
+        "area:hardware",
+        "validation"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m0-elecraft",
+        "m0-safety",
+        "m1-platform"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m1-integrate",
+      "title": "Integrate the end-to-end KX2 feasibility prototype",
+      "kind": "implementation",
+      "body_file": "planning/issues/m1-integrate.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "enhancement",
+        "area:hardware",
+        "area:firmware",
+        "area:ios",
+        "validation"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m1-ios-probe",
+        "m1-control-fw",
+        "m1-bench-interface"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m1-validate",
+      "title": "Human validation: verify KX2 fault recovery and KX3 interoperability",
+      "kind": "human",
+      "body_file": "planning/issues/m1-validate.md",
+      "milestone": "M1: End-to-end bench proof",
+      "labels": [
+        "human-required",
+        "validation",
+        "area:hardware",
+        "area:ios"
+      ],
+      "depends_on": [
+        "m0-review",
+        "m1-integrate"
+      ],
+      "parent": "m1-track",
+      "children": []
+    },
+    {
+      "id": "m2-track",
+      "title": "Track M2: Rev A open-hardware reference design",
+      "kind": "tracking",
+      "body_file": "planning/issues/m2-track.md",
+      "milestone": "M2: Rev A reference hardware",
+      "labels": [
+        "tracking",
+        "area:product",
+        "area:hardware"
+      ],
+      "depends_on": [
+        "m1-validate"
+      ],
+      "parent": null,
+      "children": []
+    },
+    {
+      "id": "m3-track",
+      "title": "Track M3: developer preview",
+      "kind": "tracking",
+      "body_file": "planning/issues/m3-track.md",
+      "milestone": "M3: Developer preview",
+      "labels": [
+        "tracking",
+        "area:product",
+        "area:ios",
+        "area:protocol"
+      ],
+      "depends_on": [
+        "m2-track"
+      ],
+      "parent": null,
+      "children": []
+    }
+  ]
+}

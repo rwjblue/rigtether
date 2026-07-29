@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Create rwjblue/rigtether, push main, and publish the issue plan"
+set -euo pipefail
+scripts/publish.sh "$@"

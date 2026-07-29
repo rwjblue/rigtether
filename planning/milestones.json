@@ -1,0 +1,18 @@
+[
+  {
+    "title": "M0: Feasibility and architecture",
+    "description": "Resolve iPhone transport, Elecraft interfaces, transmit safety, feasibility architecture, and the v0 control contract."
+  },
+  {
+    "title": "M1: End-to-end bench proof",
+    "description": "Demonstrate bidirectional audio, CAT, and fail-safe PTT from iPhone through a bench prototype to KX2, then validate KX3."
+  },
+  {
+    "title": "M2: Rev A reference hardware",
+    "description": "Design, assemble, validate, and publish the first complete open-hardware reference package."
+  },
+  {
+    "title": "M3: Developer preview",
+    "description": "Stabilize the protocol and Swift package, add update tooling, and publish a documented developer preview."
+  }
+]

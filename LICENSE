@@ -1,0 +1,25 @@
+# RigTether component licensing
+
+Copyright 2026 Robert Jackson
+
+This repository is intentionally multi-licensed by component:
+
+| Paths | License |
+| --- | --- |
+| `hardware/**` | CERN Open Hardware Licence Version 2 — Strongly Reciprocal (`CERN-OHL-S-2.0`) |
+| `firmware/**`, `ios/**`, `protocol/**`, `tools/**`, `scripts/**`, `.github/**`, `.mise/**` | Apache License 2.0 (`Apache-2.0`) |
+| `docs/**`, `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `NOTICE` | Creative Commons Attribution 4.0 International (`CC-BY-4.0`) |
+| `planning/**` | Apache License 2.0 (`Apache-2.0`) |
+
+Files with an explicit SPDX header use the license named in that header. Third-party
+files remain under their stated licenses.
+
+Full license texts are in [`LICENSES/`](LICENSES/):
+
+- `LICENSES/Apache-2.0.txt`
+- `LICENSES/CERN-OHL-S-2.0.txt`
+- `LICENSES/CC-BY-4.0.txt`
+
+Hardware recipients must also receive the complete preferred-form design source and
+notices required by CERN-OHL-S-2.0. Generated Gerbers, PDFs, STEP files, and firmware
+binaries do not replace editable source.

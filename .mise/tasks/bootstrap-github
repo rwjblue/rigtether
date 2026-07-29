@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Create or update initial GitHub labels, milestones, and issues"
+set -euo pipefail
+python3 scripts/bootstrap_github.py "$@"
