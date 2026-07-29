@@ -41,10 +41,12 @@ M1 implementation issues were intentionally prewritten and withheld from
 `agent-ready` pending owner review. Their contracts must be reassessed against the
 accepted M0 decisions before handoff.
 
-The owner approved M0 in issue #7 on 2026-07-29. After reassessment, the bounded CAT
-core in #9 and bench-platform decision in #10 are the first agent-ready M1 contracts.
-Other M1 work remains dependency-gated, and issues #13, #15, and #18 retain their
-`human-required` evidence boundaries.
+The owner approved M0 in issue #7 on 2026-07-29. Issue #10 then selected the M1
+development platform in ADR 0007. After reassessment, the bounded CAT core in #9 is
+the current agent-ready M1 contract; #12 remains blocked on #9. Issues #13 and #18
+have their listed dependencies satisfied but retain `human-required` and never receive
+`agent-ready`. Other M1 work remains dependency-gated, and issue #15 also retains its
+`human-required` evidence boundary.
 
 ## Completion evidence
 

@@ -52,6 +52,12 @@ defines the M1 radio-side contract and the measurements that still require a hum
   assigns AVFAudio and Core Bluetooth behavior to the iOS adapter, keeps protocol and
   safety semantics host-neutral, and gives USB media and BLE control separate owners,
   health signals, logs, and fault-injection strategies.
+- [ADR 0007](decisions/0007-use-nrf5340-dk-and-external-i2s-converters-for-m1.md)
+  selects the replaceable M1 development probe. Issue #18 tests UAC1 full-speed mono
+  signed-16-bit 48 kHz PCM in each direction, with exact synchronous endpoints and
+  descriptors recorded in the
+  [development-platform specification](m1-development-platform.md). This target is a
+  validation input, not an iPhone or simultaneous-transport result.
 
 Older Lightning iPhones, iPads, and wired-control fallbacks are future compatibility
 work, not M1 support claims.

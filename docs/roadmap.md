@@ -31,10 +31,12 @@ control, audio conversion, radio-profile/CAT, and PTT-safety boundaries. Simulat
 transcript fixtures, loopback, and a radio-disconnected PTT fixture precede
 human-supervised KX2/KX3 measurements.
 
-M1 chooses development hardware and exact USB descriptors and PCM formats. Those
-choices should stay inside Android's documented USB Audio Class 1 host-mode subset
-when compatible with the iPhone proof. Any exception needs contradictory evidence, an
-explicit owner decision, and a credible Android alternate path.
+ADR 0007 selects an nRF5340 DK plus external I²S converters as the replaceable M1
+development probe. It proposes full-speed UAC1 mono signed-16-bit 48 kHz PCM in each
+direction for #18, inside Android's documented host-mode subset. The selection and
+exact descriptors are test targets, not physical or current-device results. Any
+exception still needs contradictory evidence, an explicit owner decision, and a
+credible Android alternate path.
 
 ## Later — M2: Rev A open-hardware reference design
 
