@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Validate repository metadata, docs, and planning manifests"
+#MISE description="Validate repository metadata, docs, planning, and protocol vectors"
 set -euo pipefail
 python3 tools/check_repo.py
+python3 protocol/conformance.py protocol/vectors/v0.json

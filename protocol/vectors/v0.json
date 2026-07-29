@@ -1,0 +1,1087 @@
+{
+  "vector_version": 1,
+  "protocol": "0.0",
+  "ids": {
+    "boot": "11111111111111111111111111111111",
+    "boot2": "12121212121212121212121212121212",
+    "session": "44444444444444444444444444444444",
+    "session2": "45454545454545454545454545454545",
+    "wrong_session": "99999999999999999999999999999999",
+    "intent": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "intent2": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "framing": [
+    {
+      "id": "minimum-runtime-value-limit",
+      "covers": ["framing_runtime_limit"],
+      "message": "{\"type\":\"status\"}",
+      "frame_limit": 20,
+      "transfer_id": 1,
+      "max_message_bytes": 1024,
+      "expect": {
+        "payload_lengths": [4, 4, 4, 4, 1],
+        "flags": [1, 0, 0, 0, 2],
+        "offsets": [0, 4, 8, 12, 16],
+        "round_trip": "{\"type\":\"status\"}"
+      }
+    },
+    {
+      "id": "larger-runtime-value-limit",
+      "covers": ["framing_runtime_limit"],
+      "message": "{\"type\":\"request\",\"seq\":1}",
+      "frame_limit": 31,
+      "transfer_id": 4294967295,
+      "max_message_bytes": 1024,
+      "expect": {
+        "payload_lengths": [15, 11],
+        "flags": [1, 2],
+        "offsets": [0, 15],
+        "round_trip": "{\"type\":\"request\",\"seq\":1}"
+      }
+    }
+  ],
+  "bad_framing": [
+    {
+      "id": "fragment-gap",
+      "covers": ["framing_malformed"],
+      "message": "{\"type\":\"request\",\"seq\":1}",
+      "frame_limit": 20,
+      "transfer_id": 7,
+      "max_message_bytes": 1024,
+      "mutation": "gap",
+      "expect_error": "gap_or_overlap"
+    },
+    {
+      "id": "fragment-reserved-bit",
+      "covers": ["framing_malformed"],
+      "message": "{\"type\":\"request\",\"seq\":1}",
+      "frame_limit": 20,
+      "transfer_id": 8,
+      "max_message_bytes": 1024,
+      "mutation": "nonzero_reserved",
+      "expect_error": "nonzero_reserved"
+    },
+    {
+      "id": "fragment-unknown-flags",
+      "covers": ["framing_malformed"],
+      "message": "{\"type\":\"request\",\"seq\":1}",
+      "frame_limit": 20,
+      "transfer_id": 9,
+      "max_message_bytes": 1024,
+      "mutation": "unknown_flags",
+      "expect_error": "unknown_flags"
+    },
+    {
+      "id": "fragment-changed-total",
+      "covers": ["framing_malformed"],
+      "message": "{\"type\":\"request\",\"seq\":1}",
+      "frame_limit": 20,
+      "transfer_id": 10,
+      "max_message_bytes": 1024,
+      "mutation": "changed_total_length",
+      "expect_error": "changed_total_length"
+    },
+    {
+      "id": "fragment-missing-end",
+      "covers": ["framing_malformed"],
+      "message": "{\"type\":\"request\",\"seq\":1}",
+      "frame_limit": 20,
+      "transfer_id": 11,
+      "max_message_bytes": 1024,
+      "mutation": "missing_end",
+      "expect_error": "missing_end"
+    }
+  ],
+  "bad_messages": [
+    {
+      "id": "invalid-json",
+      "covers": ["malformed_message"],
+      "message": "{"
+    },
+    {
+      "id": "duplicate-json-key",
+      "covers": ["malformed_message"],
+      "message": "{\"seq\":1,\"seq\":2}"
+    },
+    {
+      "id": "floating-point-number",
+      "covers": ["malformed_message"],
+      "message": "{\"requested_ms\":1.0}"
+    },
+    {
+      "id": "negative-integer",
+      "covers": ["malformed_message"],
+      "message": "{\"device_time_ms\":-1}"
+    },
+    {
+      "id": "non-object-top-level",
+      "covers": ["malformed_message"],
+      "message": "[]"
+    },
+    {
+      "id": "invalid-utf8",
+      "covers": ["malformed_message"],
+      "hex": "ff"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "normal-acquire-renew-release",
+      "covers": ["normal"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000001",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "expect": {
+            "next_seq": 2,
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "safety_state": "receive_safe",
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000002",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          },
+          "expect": {
+            "next_seq": 3,
+            "safety_state": "tx_active",
+            "commanded": "active",
+            "ptt_out": "active",
+            "radio_profile": "kx2",
+            "lease_id": "00000000000000000000000000000001",
+            "lease_deadline_ms": 500,
+            "owner": {
+              "boot_id": "11111111111111111111111111111111",
+              "session_id": "44444444444444444444444444444444",
+              "lease_id": "00000000000000000000000000000001",
+              "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "action": "advance",
+          "ms": 250,
+          "expect": {
+            "now_ms": 250,
+            "lease_deadline_ms": 500,
+            "safety_state": "tx_active"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000003",
+          "seq": 3,
+          "command": {
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "requested_ms": 500
+          },
+          "expect": {
+            "next_seq": 4,
+            "lease_deadline_ms": 750,
+            "safety_state": "tx_active"
+          }
+        },
+        {
+          "action": "advance",
+          "ms": 100
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000004",
+          "seq": 4,
+          "command": {
+            "type": "ptt_release",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "reason": "operator_release"
+          },
+          "expect": {
+            "next_seq": 5,
+            "safety_state": "receive_safe",
+            "commanded": "inactive",
+            "ptt_out": "inactive",
+            "lease_id": null,
+            "owner": null,
+            "intent_id": null,
+            "last_release_code": "operator_release",
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {
+            "safety_state": "receive_safe",
+            "ptt_out": "inactive",
+            "first_fault_code": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "exact-duplicate-renew-does-not-extend",
+      "covers": ["exact_duplicate"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000011",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000012",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {"action": "advance", "ms": 200},
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000013",
+          "seq": 3,
+          "command": {
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "requested_ms": 500
+          },
+          "expect": {
+            "next_seq": 4,
+            "lease_deadline_ms": 700,
+            "last_result": {
+              "ok": true,
+              "result": {"lease_deadline_ms": 700}
+            }
+          }
+        },
+        {"action": "advance", "ms": 100},
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000013",
+          "seq": 3,
+          "command": {
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "requested_ms": 500
+          },
+          "expect": {
+            "now_ms": 300,
+            "next_seq": 4,
+            "lease_deadline_ms": 700,
+            "safety_state": "tx_active",
+            "last_result": {
+              "ok": true,
+              "result": {"lease_deadline_ms": 700}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "altered-duplicate-locks-out",
+      "covers": ["altered_duplicate", "protocol_fault"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000021",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000022",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000022",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 400
+          },
+          "expect": {
+            "next_seq": 3,
+            "safety_state": "fault_lockout",
+            "commanded": "inactive",
+            "first_fault_code": "protocol_fault",
+            "last_result": {
+              "ok": false,
+              "error": {
+                "code": "altered_duplicate",
+                "safety_effect": "lockout",
+                "radio_io_attempted": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stale-replay-locks-out",
+      "covers": ["stale_replay"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000031",
+          "seq": 1,
+          "command": {"type": "status_read"}
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000032",
+          "seq": 1,
+          "command": {"type": "status_read"},
+          "expect": {
+            "safety_state": "fault_lockout",
+            "first_fault_code": "protocol_fault",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "stale_operation"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "out-of-order-locks-out",
+      "covers": ["out_of_order"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000041",
+          "seq": 2,
+          "command": {"type": "status_read"},
+          "expect": {
+            "next_seq": 1,
+            "safety_state": "fault_lockout",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "out_of_order"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "malformed-current-message-locks-out",
+      "covers": ["malformed_message"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000051",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000052",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "malformed",
+          "expect": {
+            "safety_state": "fault_lockout",
+            "commanded": "inactive",
+            "first_fault_code": "protocol_fault",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "malformed"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wrong-session-current-channel",
+      "covers": ["wrong_session"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000061",
+          "seq": 1,
+          "session_id": "99999999999999999999999999999999",
+          "command": {"type": "status_read"},
+          "expect": {
+            "safety_state": "fault_lockout",
+            "first_fault_code": "protocol_fault",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "wrong_session"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stale-boot-current-channel",
+      "covers": ["stale_boot"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000071",
+          "seq": 1,
+          "boot_id": "12121212121212121212121212121212",
+          "command": {"type": "status_read"},
+          "expect": {
+            "safety_state": "fault_lockout",
+            "first_fault_code": "protocol_fault",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "stale_boot"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "post-expiry-renew-cannot-revive",
+      "covers": ["post_expiry"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000081",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000082",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "advance",
+          "ms": 500,
+          "expect": {
+            "now_ms": 500,
+            "safety_state": "receive_safe",
+            "commanded": "inactive",
+            "lease_id": null,
+            "intent_id": null,
+            "last_release_code": "lease_expired"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000083",
+          "seq": 3,
+          "command": {
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "requested_ms": 500
+          },
+          "expect": {
+            "next_seq": 4,
+            "safety_state": "receive_safe",
+            "lease_id": null,
+            "last_result": {
+              "ok": false,
+              "error": {"code": "lease_expired"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "session-replacement-releases-and-old-traffic-faults",
+      "covers": ["session_replacement"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000091",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000092",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "session_replace",
+          "expect": {
+            "session_id": "45454545454545454545454545454545",
+            "next_seq": 1,
+            "safety_state": "receive_safe",
+            "commanded": "inactive",
+            "lease_id": null,
+            "intent_id": null,
+            "last_release_code": "session_replaced"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000093",
+          "seq": 3,
+          "session_id": "44444444444444444444444444444444",
+          "command": {"type": "status_read"},
+          "expect": {
+            "session_id": "45454545454545454545454545454545",
+            "safety_state": "fault_lockout",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "wrong_session"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ble-disconnect-and-reconnect-keep-audio-independent",
+      "covers": ["reconnect", "ble_loss", "independent_health"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000101",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000102",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "disconnect",
+          "expect": {
+            "ble_link": "disconnected",
+            "protocol_session": "none",
+            "session_id": null,
+            "device_audio": "healthy",
+            "host_route": "healthy",
+            "safety_state": "receive_safe",
+            "commanded": "inactive",
+            "last_release_code": "ble_disconnect"
+          }
+        },
+        {
+          "action": "reconnect",
+          "expect": {
+            "ble_link": "connected",
+            "protocol_session": "none",
+            "session_id": null,
+            "safety_state": "receive_safe",
+            "intent_id": null
+          }
+        },
+        {
+          "action": "new_session",
+          "expect": {
+            "session_id": "45454545454545454545454545454545",
+            "protocol_session": "active",
+            "next_seq": 1,
+            "safety_state": "receive_safe",
+            "lease_id": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "host-route-loss-releases-with-ble-healthy",
+      "covers": ["host_route_loss", "independent_health"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000111",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000112",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "set_health",
+          "domain": "host_route",
+          "value": "unhealthy",
+          "expect": {
+            "host_route": "unhealthy",
+            "device_audio": "healthy",
+            "ble_link": "connected",
+            "protocol_session": "active",
+            "safety_state": "receive_safe",
+            "last_release_code": "host_route_unhealthy"
+          }
+        }
+      ]
+    },
+    {
+      "id": "device-audio-fault-releases-with-ble-healthy",
+      "covers": ["device_audio_fault", "independent_health"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000121",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000122",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "set_health",
+          "domain": "device_audio",
+          "value": "unhealthy",
+          "expect": {
+            "host_route": "healthy",
+            "device_audio": "unhealthy",
+            "ble_link": "connected",
+            "protocol_session": "active",
+            "safety_state": "receive_safe",
+            "last_release_code": "device_audio_unhealthy"
+          }
+        }
+      ]
+    },
+    {
+      "id": "inhibit-denial-and-active-release",
+      "covers": ["inhibit"],
+      "initial": {"inhibit": "open"},
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000131",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000132",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          },
+          "expect": {
+            "safety_state": "receive_safe",
+            "commanded": "inactive",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "inhibit_open"}
+            }
+          }
+        },
+        {
+          "action": "set_health",
+          "domain": "inhibit",
+          "value": "closed"
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000133",
+          "seq": 3,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          },
+          "expect": {"safety_state": "tx_active"}
+        },
+        {
+          "action": "set_health",
+          "domain": "inhibit",
+          "value": "open",
+          "expect": {
+            "inhibit": "open",
+            "ptt_out": "inactive",
+            "safety_state": "receive_safe",
+            "last_release_code": "inhibit_open",
+            "first_fault_code": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "failed-assertion-and-first-cause-preservation",
+      "covers": ["output_failed_to_assert", "first_cause"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000141",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000142",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {
+            "safety_state": "fault_lockout",
+            "commanded": "inactive",
+            "ptt_out": "inactive",
+            "first_fault_code": "output_failed_to_assert",
+            "first_fault_id": "0000000000000000000000000000f001"
+          }
+        },
+        {
+          "action": "fault",
+          "code": "radio_control_fault",
+          "expect": {
+            "first_fault_code": "output_failed_to_assert",
+            "first_fault_id": "0000000000000000000000000000f001"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stuck-active-output-lockout",
+      "covers": ["output_stuck_active"],
+      "steps": [
+        {
+          "action": "sense",
+          "value": "active",
+          "expect": {
+            "safety_state": "fault_lockout",
+            "commanded": "inactive",
+            "ptt_out": "active",
+            "first_fault_code": "output_stuck_active"
+          }
+        }
+      ]
+    },
+    {
+      "id": "typed-cat-allowlist-and-pre-io-denial",
+      "covers": ["cat_allowlist", "cat_denial"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000151",
+          "seq": 1,
+          "command": {"type": "radio_vfo_a_read"},
+          "expect": {
+            "radio_io_count": 1,
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000152",
+          "seq": 2,
+          "command": {"type": "raw_cat", "bytes": "TX;"},
+          "expect": {
+            "radio_io_count": 1,
+            "last_result": {
+              "ok": false,
+              "error": {
+                "code": "unsupported_radio_operation",
+                "radio_io_attempted": false
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000153",
+          "seq": 3,
+          "command": {"type": "radio_transmit"},
+          "expect": {
+            "radio_io_count": 1,
+            "last_result": {
+              "ok": false,
+              "error": {
+                "code": "unsupported_radio_operation",
+                "radio_io_attempted": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "radio-control-fault-releases-and-locks",
+      "covers": ["radio_fault"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000161",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000162",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "fault",
+          "code": "radio_control_fault",
+          "expect": {
+            "safety_state": "fault_lockout",
+            "commanded": "inactive",
+            "first_fault_code": "radio_control_fault",
+            "last_release_code": "radio_control_fault"
+          }
+        }
+      ]
+    },
+    {
+      "id": "continuous-cap-rearm-and-new-action",
+      "covers": ["continuous_cap", "rearm", "recovery"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000171",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000172",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "sustain_to_cap",
+          "renew_every_ms": 250,
+          "requested_ms": 500,
+          "expect": {
+            "now_ms": 60000,
+            "next_seq": 242,
+            "safety_state": "fault_lockout",
+            "commanded": "inactive",
+            "lease_id": null,
+            "first_fault_code": "continuous_cap",
+            "first_fault_id": "0000000000000000000000000000f001",
+            "last_result": {
+              "ok": true,
+              "result": {"accepted_renewals": 239}
+            }
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive"
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000173",
+          "seq": 242,
+          "command": {
+            "type": "ptt_release",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "reason": "operator_release"
+          },
+          "expect": {
+            "next_seq": 243,
+            "safety_state": "fault_lockout",
+            "last_result": {"ok": true}
+          }
+        },
+        {"action": "advance", "ms": 999},
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000174",
+          "seq": 243,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f001"
+          },
+          "expect": {
+            "next_seq": 244,
+            "safety_state": "fault_lockout",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "rearm_incomplete"}
+            }
+          }
+        },
+        {"action": "advance", "ms": 1},
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000175",
+          "seq": 244,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f001"
+          },
+          "expect": {
+            "next_seq": 245,
+            "safety_state": "receive_safe",
+            "first_fault_code": null,
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000176",
+          "seq": 245,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "expect": {
+            "next_seq": 246,
+            "intent_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000177",
+          "seq": 246,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "requested_ms": 500
+          },
+          "expect": {
+            "next_seq": 247,
+            "safety_state": "tx_active",
+            "lease_id": "00000000000000000000000000000002",
+            "lease_deadline_ms": 61500
+          }
+        }
+      ]
+    },
+    {
+      "id": "watchdog-release-creates-new-boot",
+      "covers": ["watchdog"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000181",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000182",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "watchdog",
+          "expect": {
+            "now_ms": 500,
+            "boot_id": "12121212121212121212121212121212",
+            "session_id": null,
+            "protocol_session": "none",
+            "safety_state": "receive_safe",
+            "commanded": "inactive",
+            "last_release_code": "watchdog_reset"
+          }
+        }
+      ]
+    }
+  ]
+}
