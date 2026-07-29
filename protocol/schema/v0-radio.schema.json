@@ -84,22 +84,38 @@
       "additionalProperties": false
     },
     "identifyResult": {
-      "type": "object",
-      "required": ["type", "profile", "product_code", "option_flags"],
-      "properties": {
-        "type": {"const": "radio_identify"},
-        "profile": {"$ref": "#/$defs/profile"},
-        "product_code": {
-          "type": "integer",
-          "enum": [1, 2]
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "profile", "product_code", "option_flags"],
+          "properties": {
+            "type": {"const": "radio_identify"},
+            "profile": {"const": "kx2"},
+            "product_code": {"const": 1},
+            "option_flags": {
+              "type": "array",
+              "items": {"enum": ["a", "p", "f", "t", "b", "x", "i"]},
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
         },
-        "option_flags": {
-          "type": "array",
-          "items": {"enum": ["a", "p", "f", "t", "b", "x", "i"]},
-          "uniqueItems": true
+        {
+          "type": "object",
+          "required": ["type", "profile", "product_code", "option_flags"],
+          "properties": {
+            "type": {"const": "radio_identify"},
+            "profile": {"const": "kx3"},
+            "product_code": {"const": 2},
+            "option_flags": {
+              "type": "array",
+              "items": {"enum": ["a", "p", "f", "t", "b", "x", "i"]},
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "firmwareResult": {
       "type": "object",

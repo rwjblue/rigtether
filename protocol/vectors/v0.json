@@ -1,6 +1,7 @@
 {
   "vector_version": 1,
   "protocol": "0.0",
+  "radio_schema": "../schema/v0-radio.schema.json",
   "ids": {
     "boot": "11111111111111111111111111111111",
     "boot2": "12121212121212121212121212121212",
@@ -110,8 +111,8 @@
     },
     {
       "id": "negative-integer",
-      "covers": ["malformed_message"],
-      "message": "{\"device_time_ms\":-1}"
+      "covers": ["malformed_message", "radio_argument_validation"],
+      "message": "{\"command\":{\"type\":\"radio_vfo_a_set\",\"frequency_hz\":-1}}"
     },
     {
       "id": "non-object-top-level",
@@ -1450,7 +1451,11 @@
     },
     {
       "id": "exact-typed-radio-results",
-      "covers": ["typed_radio_schema", "cat_allowlist"],
+      "covers": [
+        "typed_radio_schema",
+        "cat_allowlist",
+        "radio_argument_validation"
+      ],
       "steps": [
         {
           "action": "request",
@@ -1576,6 +1581,25 @@
               "result": {
                 "type": "radio_tx_state_read",
                 "tx_state": "receive"
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000229",
+          "seq": 9,
+          "command": {
+            "type": "radio_vfo_a_set",
+            "frequency_hz": 100000000000
+          },
+          "expect": {
+            "radio_io_count": 8,
+            "last_result": {
+              "ok": false,
+              "error": {
+                "code": "invalid_argument",
+                "radio_io_attempted": false
               }
             }
           }
@@ -1734,6 +1758,319 @@
           },
           "expect": {
             "safety_state": "receive_safe",
+            "first_fault_code": null,
+            "last_result": {"ok": true}
+          }
+        }
+      ]
+    },
+    {
+      "id": "faulted-session-cannot-complete-rearm",
+      "covers": ["faulted_session_rearm", "rearm_continuity", "recovery"],
+      "initial": {
+        "safety_state": "fault_lockout",
+        "first_fault_code": "continuous_cap",
+        "first_fault_id": "0000000000000000000000000000f121",
+        "first_fault_at_ms": 0,
+        "cap_release_reported": true,
+        "rearm_started_ms": 0
+      },
+      "steps": [
+        {
+          "action": "malformed",
+          "expect": {
+            "protocol_session": "faulted",
+            "first_fault_code": "continuous_cap",
+            "rearm_started_ms": null
+          }
+        },
+        {"action": "advance", "ms": 1000},
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000251",
+          "seq": 1,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f121"
+          },
+          "expect": {
+            "safety_state": "fault_lockout",
+            "protocol_session": "faulted",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "rearm_incomplete"}
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000051",
+          "op_id": "30000000000000000000000000000051",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 185,
+          "client_max_message_bytes": 1024,
+          "expect": {
+            "session_id": "00000000000000000000000000004501",
+            "protocol_session": "active",
+            "host_route": "unknown",
+            "safety_state": "fault_lockout",
+            "rearm_started_ms": null
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000252",
+          "seq": 1,
+          "command": {
+            "type": "host_audio_route_report",
+            "health": "healthy"
+          },
+          "expect": {
+            "host_route": "healthy",
+            "rearm_started_ms": 1000
+          }
+        },
+        {"action": "advance", "ms": 1000},
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000253",
+          "seq": 2,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f121"
+          },
+          "expect": {
+            "safety_state": "receive_safe",
+            "protocol_session": "active",
+            "first_fault_code": null,
+            "last_result": {"ok": true}
+          }
+        }
+      ]
+    },
+    {
+      "id": "session-operation-cap-and-final-duplicate",
+      "covers": ["session_exhaustion", "exact_duplicate"],
+      "steps": [
+        {
+          "action": "fill_session",
+          "expect": {
+            "next_seq": 513,
+            "cached_operations": 512,
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000005200",
+          "seq": 512,
+          "command": {"type": "status_read"},
+          "expect": {
+            "next_seq": 513,
+            "cached_operations": 512,
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000005300",
+          "seq": 513,
+          "command": {"type": "status_read"},
+          "expect": {
+            "next_seq": 513,
+            "cached_operations": 512,
+            "last_result": {
+              "ok": false,
+              "error": {"code": "session_exhausted"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "kx3-identity-code-is-correlated",
+      "covers": ["radio_identity_correlation", "typed_radio_schema"],
+      "initial": {"radio_profile": "kx3"},
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000261",
+          "seq": 1,
+          "command": {"type": "radio_identify"},
+          "expect": {
+            "radio_io_count": 1,
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_identify",
+                "profile": "kx3",
+                "product_code": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "mismatched-radio-identity-releases-and-locks",
+      "covers": ["radio_identity_correlation", "radio_fault"],
+      "initial": {"radio_profile": "kx3"},
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000271",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000272",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "inject_radio_identity",
+          "product_code": 1
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000273",
+          "seq": 3,
+          "command": {"type": "radio_identify"},
+          "expect": {
+            "radio_io_count": 1,
+            "commanded": "inactive",
+            "ptt_out": "active",
+            "lease_id": null,
+            "safety_state": "fault_lockout",
+            "profile": "faulted",
+            "first_fault_code": "radio_control_fault",
+            "last_result": {
+              "ok": false,
+              "error": {
+                "code": "radio_control_fault",
+                "safety_effect": "lockout",
+                "radio_io_attempted": true
+              }
+            }
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {
+            "ptt_out": "inactive",
+            "safety_state": "fault_lockout",
+            "profile": "faulted",
+            "first_fault_code": "radio_control_fault"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000274",
+          "seq": 4,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f001"
+          },
+          "expect": {
+            "safety_state": "fault_lockout",
+            "profile": "faulted",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "rearm_incomplete"}
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000275",
+          "seq": 5,
+          "command": {"type": "radio_profile_select", "profile": "kx3"},
+          "expect": {
+            "session_id": null,
+            "protocol_session": "none",
+            "profile": "validating",
+            "safety_state": "fault_lockout",
+            "first_fault_code": "radio_control_fault",
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_profile_select",
+                "profile": "kx3",
+                "state": "validating",
+                "session_invalidated": true
+              }
+            }
+          }
+        },
+        {
+          "action": "profile_validated",
+          "expect": {
+            "profile": "ready",
+            "session_id": null,
+            "safety_state": "fault_lockout"
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000071",
+          "op_id": "30000000000000000000000000000071",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 185,
+          "client_max_message_bytes": 1024,
+          "expect": {
+            "session_id": "00000000000000000000000000004501",
+            "protocol_session": "active",
+            "host_route": "unknown",
+            "safety_state": "fault_lockout"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000276",
+          "seq": 1,
+          "command": {
+            "type": "host_audio_route_report",
+            "health": "healthy"
+          },
+          "expect": {
+            "host_route": "healthy",
+            "safety_state": "fault_lockout"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000277",
+          "seq": 2,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f001"
+          },
+          "expect": {
+            "safety_state": "receive_safe",
+            "profile": "ready",
             "first_fault_code": null,
             "last_result": {"ok": true}
           }
