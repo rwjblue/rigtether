@@ -7,12 +7,13 @@ complete system architecture. The phone transport is a settled input from
 ## Working model
 
 ```text
-┌──────────────────────┐
-│ iPhone application   │
-│                      │
-│ audio engine         │
-│ RigTetherKit          │
-└───────┬──────────────┘
+┌────────────────────────────┐
+│ Host application           │
+│ iOS first; Android future  │
+│                            │
+│ platform audio adapter     │
+│ protocol/control adapter   │
+└──────────┬─────────────────┘
         │
         │ USB-C: class-compliant USB audio
         │ BLE: versioned GATT control service
@@ -40,12 +41,17 @@ complete system architecture. The phone transport is a settled input from
 ## Boundaries
 
 - **Host audio transport:** a class-compliant USB Audio function presents one or more
-  receive and transmit streams through the iOS audio route. M1 selects and validates
-  the exact class revision, descriptors, channel count, sample formats, and power
-  behavior.
+  receive and transmit streams through the host audio stack. The iOS adapter uses
+  AVFAudio. M1 selects and validates the exact class revision, descriptors, channel
+  count, sample formats, and power behavior on iPhone while preserving a documented
+  Android path or escalating an incompatibility for owner decision.
 - **Host control transport:** a custom BLE GATT service carries discovery,
-  capabilities, state, commands, bounded PTT leases, and errors. The iPhone is the BLE
-  central/GATT client and the interface is the peripheral/GATT server.
+  capabilities, state, commands, bounded PTT leases, and errors. The host is the BLE
+  central/GATT client and the interface is the peripheral/GATT server. Core Bluetooth
+  owns the iOS implementation, not the device contract.
+- **Host adapters:** own platform audio routing, permissions, lifecycle, and BLE API
+  behavior. They translate those events into the versioned transport and safety model
+  without making platform callbacks or framework types part of the device protocol.
 - **Control core:** owns protocol state, watchdogs, PTT arbitration, and radio profile.
 - **CAT adapter:** converts versioned host operations or safe passthrough into the
   radio's documented CAT protocol.
@@ -61,6 +67,8 @@ complete system architecture. The phone transport is a settled input from
 - Audio output alone must not unexpectedly assert PTT unless an explicitly selected
   and bounded VOX mode exists.
 - Radio-specific pin assignments never appear as generic host API guarantees.
+- Apple framework types, callback ordering, background execution, and audio-session
+  behavior never become device-side protocol guarantees.
 - Firmware and host versions negotiate capabilities rather than silently assuming them.
 - The bench prototype remains observable: test points, logs, and simulators are first-
   class requirements.
@@ -80,8 +88,9 @@ ADR 0003 fixes only the boundary needed by architecture and protocol work:
   expiry, reset, malformed input, or a new session returns the interface to receive.
 - Message boundaries and sizes respect the negotiated GATT/ATT limits. The v0 protocol
   issue owns payloads, characteristic layout, ordering, errors, and test vectors.
-- The app may use the documented audio and `bluetooth-central` background modes only
-  for their intended work. Safety does not depend on indefinite background execution.
+- The iOS app may use the documented audio and `bluetooth-central` background modes
+  only for their intended work. Safety does not depend on indefinite host execution on
+  iOS, Android, or another platform.
 
 The single-tether goal remains intact: one USB-C cable carries audio and any supported
 power, while BLE is wireless control. Pairing, reconnect, coexistence, latency, and
@@ -90,6 +99,8 @@ power are explicit M1 measurements rather than assumed properties.
 ## Open M0 questions
 
 - Which USB Audio Class topology and sample formats should the M1 hardware expose?
+- Which conservative descriptor and format choices preserve Android USB Audio host
+  interoperability without weakening the iPhone proof?
 - What exact voltage, impedance, bias, grounding, and timing requirements apply to KX2
   and KX3 ports?
 - Should the protocol expose raw CAT, typed capabilities, or both?

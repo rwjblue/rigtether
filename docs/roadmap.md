@@ -8,6 +8,7 @@ issues own executable work.
 Establish a source-backed product baseline:
 
 - iPhone control transport and distribution constraints;
+- cross-host constraints that preserve a future Android implementation;
 - KX2/KX3 audio, CAT, and PTT requirements;
 - transmit-safety invariants;
 - feasibility architecture and component boundaries; and
@@ -34,12 +35,23 @@ After M1 evidence supports proceeding:
 - assemble and validate prototypes; and
 - publish complete manufacturing source and known limitations.
 
+Before Rev A freezes USB descriptors, power behavior, or BLE semantics, run a bounded
+interoperability check on representative USB-C Android hardware or record an explicit
+owner decision accepting the incompatibility and a credible alternate path.
+
 Detailed M2 child issues should be written only after the M1 exit review.
 
 ## Later — M3: developer preview
 
 Stabilize the host protocol and Swift package, add configuration/update tooling, build a
 small reference iOS application, and publish a documented developer preview.
+
+## Future — Android host support
+
+After the iOS-first transport, hardware, safety, and protocol contracts have evidence,
+implement an Android host adapter and reference application. Validate USB Audio and BLE
+control together on a documented device/OS matrix, including power, routing, lifecycle,
+reconnect, and receive-safe fault behavior.
 
 Support for additional radios and applications follows evidence from the first preview,
 not speculation during M0.

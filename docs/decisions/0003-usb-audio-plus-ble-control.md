@@ -15,6 +15,10 @@ The feasibility prototype also needs a narrow decision, not a permanent public
 protocol or production USB topology. Current-device tests still own exact descriptors,
 formats, latency, RF coexistence, power, and App Store submission evidence.
 
+iPhone is the first implementation and validation target. Android is a planned future
+host, so the feasibility choice must not require Apple-only accessory protocols or make
+Apple framework behavior part of the hardware, firmware, or device protocol contract.
+
 ## Decision
 
 Use two independent logical transports:
@@ -77,6 +81,29 @@ identity, ordering, errors, security policy, and exact lease semantics.
 
 No control transport is treated as hard real time. PTT response and release timing are
 M1 measurements against bounds chosen by the safety decision.
+
+## Future-host portability constraint
+
+The first proof remains iOS-only, but implementation decisions preserve a credible
+Android path:
+
+- RigTether remains the class-compliant USB Audio peripheral and BLE peripheral/GATT
+  server; the phone remains the USB host and BLE central/GATT client.
+- M1 should select USB descriptors and PCM formats within Android's documented USB
+  Audio Class 1 host-mode subset when those choices also satisfy the iPhone proof.
+- A descriptor, format, power, or topology choice outside that Android baseline requires
+  an explicit owner decision that records the compatibility cost and a credible
+  alternate path before Rev A freezes it.
+- GATT payloads respect negotiated ATT limits and cannot depend on Core Bluetooth MTUs,
+  callback ordering, state restoration, or background scheduling.
+- AVFAudio and Core Bluetooth behavior stays inside the iOS host adapter. Firmware,
+  safety semantics, protocol definitions, and test vectors remain host-platform
+  independent.
+
+Android USB host/audio support and device behavior vary by product and OEM. These
+constraints preserve implementability; they do not establish an Android support claim.
+Representative-device evidence is required before Rev A freezes the affected behavior,
+and a future Android release requires its own documented compatibility matrix.
 
 ## Background and App Store constraints
 
@@ -161,3 +188,6 @@ xcrun --sdk macosx --show-sdk-path
   desktop-only diagnostics must remain clearly separate.
 - macOS and Android remain plausible future hosts because the selected transports are
   standardized, but no compatibility claim exists until tested.
+- Before Rev A freezes USB descriptors, power assumptions, or BLE semantics, a bounded
+  representative Android test must pass or an owner decision must record the accepted
+  incompatibility and alternate path.

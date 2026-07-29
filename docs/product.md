@@ -22,6 +22,7 @@ and control the radio without a powered hub or a pile of adapters.
 ## M0 product goals
 
 - Determine a distribution-compatible iPhone transport using current primary sources.
+- Preserve a credible Android host path without expanding the first proof beyond iOS.
 - Establish source-backed KX2 and KX3 electrical and CAT requirements.
 - Define transmit-safety invariants before implementation.
 - Select a feasibility architecture with explicit component boundaries.
@@ -48,6 +49,7 @@ Through an iPhone, bench prototype, KX2, and dummy load:
 - On-air unattended transmission
 - High-power RF switching or antenna control
 - A stable public SDK before the transport and protocol are validated
+- An Android application or Android support claim during the first proof
 
 ## Product principles
 
@@ -57,6 +59,10 @@ Through an iPhone, bench prototype, KX2, and dummy load:
   transmit.
 - **Open at every layer.** Editable hardware source, firmware, protocol, host library,
   test fixtures, and manufacturing information must be available.
+- **iOS first, host-portable at the boundary.** Platform frameworks belong in host
+  adapters. Hardware, firmware, USB descriptors, BLE behavior, protocol semantics, and
+  test vectors must not require Apple-only behavior unless an explicit decision records
+  the compatibility cost and alternative.
 - **Radio-specific at the edge.** Harnesses and adapters own connector details; host
   applications target a versioned capability model.
 - **Measured, not assumed.** Electrical claims come from official specifications or

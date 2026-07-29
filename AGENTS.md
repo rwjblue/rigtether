@@ -8,6 +8,9 @@ jj-commit-default: auto
   applications and amateur-radio transceivers.
 - The first validated target is iPhone plus Elecraft KX2, followed by KX3
   interoperability.
+- Android is a planned future host. iOS-first work must not make the hardware,
+  firmware, USB descriptors, BLE protocol, or safety semantics depend on Apple-only
+  behavior without an explicit owner decision.
 - The project must support bidirectional audio, radio control, and fail-safe transmit
   control. A single physical phone tether is a product goal, not an excuse to assume
   a transport before it is proven.
@@ -74,6 +77,9 @@ When explicitly handed a GitHub issue:
   firmware when the selected platform supports it without compromising USB audio,
   Bluetooth, or maintainability.
 - Use Swift and standard Apple frameworks for iOS code.
+- Keep platform APIs behind host adapters. Shared protocol definitions, fixtures, and
+  device behavior must remain implementable by a future Android client without
+  reproducing Core Bluetooth or AVFAudio semantics.
 - Use KiCad source files for released hardware designs.
 - Keep radio-specific behavior behind explicit profiles or adapters. The first
   Elecraft implementation may be narrow, but host APIs must not silently encode KX2

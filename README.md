@@ -12,7 +12,9 @@ RigTether is an open-hardware and open-source software project exploring a compa
 interface between phones, tablets, computers, and amateur-radio transceivers. The
 first target is an iPhone connected to an Elecraft KX2 or KX3, with enough capability
 for applications to exchange receive and transmit audio, inspect and control the radio,
-and key the transmitter safely.
+and key the transmitter safely. Android is a planned future host: the iOS-first proof
+must preserve portable hardware, firmware, transport, and protocol boundaries rather
+than depend on Apple-only device behavior.
 
 The working product shape is:
 
@@ -48,8 +50,9 @@ has to prove exact audio formats, coexistence, latency, reconnect behavior, and 
 > connect unpublished circuits to a radio.
 
 The current work is limited to establishing the product contract, iPhone transport,
-Elecraft electrical requirements, transmit-safety invariants, system architecture, and
-an initial control protocol. See the [roadmap](docs/roadmap.md) and
+cross-host portability constraints, Elecraft electrical requirements, transmit-safety
+invariants, system architecture, and an initial control protocol. See the
+[roadmap](docs/roadmap.md) and
 [work-tracking guide](docs/work-tracking.md).
 
 ## Initial success criterion
