@@ -53,7 +53,29 @@ REQUIRED_COVERAGE = {
     "recovery",
     "first_cause",
     "watchdog",
+    "session_negotiation",
+    "unsupported_version",
+    "missing_capability",
+    "limit_negotiation",
+    "duplicate_session_start",
+    "malformed_command",
+    "release_sensing",
+    "rearm_continuity",
+    "profile_selection",
+    "typed_radio_schema",
 }
+
+REQUIRED_CAPABILITIES = {
+    "ordered_operations",
+    "typed_radio_v0",
+    "ptt_leases_v0",
+    "independent_health_v0",
+    "first_cause_fault_v0",
+}
+DEVICE_ID = "00112233445566778899aabbccddeeff"
+DEVICE_FRAME_LIMIT = 185
+DEVICE_MAX_MESSAGE_BYTES = 1024
+MAX_SESSION_OPERATIONS = 512
 
 
 class ConformanceError(Exception):
@@ -72,6 +94,14 @@ def ensure_uint(value: Any, name: str, maximum: int = (1 << 64) - 1) -> int:
     return value
 
 
+def is_hex_id(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 32
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def canonical_request(event: dict[str, Any], boot_id: str, session_id: str) -> bytes:
     message = {
         "type": "request",
@@ -81,6 +111,24 @@ def canonical_request(event: dict[str, Any], boot_id: str, session_id: str) -> b
         "op_id": event["op_id"],
         "seq": event["seq"],
         "command": event["command"],
+    }
+    if "serialization_tag" in event:
+        message["_vector_serialization_tag"] = event["serialization_tag"]
+    return json.dumps(
+        message, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+
+
+def canonical_session_start(event: dict[str, Any], boot_id: str) -> bytes:
+    message = {
+        "type": "session_start",
+        "boot_id": event.get("boot_id", boot_id),
+        "client_nonce": event["client_nonce"],
+        "op_id": event["op_id"],
+        "select": event["select"],
+        "required_capabilities": event["required_capabilities"],
+        "client_rx_frame_limit": event["client_rx_frame_limit"],
+        "client_max_message_bytes": event["client_max_message_bytes"],
     }
     if "serialization_tag" in event:
         message["_vector_serialization_tag"] = event["serialization_tag"]
@@ -213,7 +261,7 @@ class Model:
     seq_to_op: dict[int, str] = field(default_factory=dict)
     ble_link: str = "connected"
     protocol_session: str = "active"
-    host_route: str = "healthy"
+    host_route: str = "unknown"
     device_audio: str = "healthy"
     profile: str = "ready"
     radio_profile: str = "kx2"
@@ -238,11 +286,20 @@ class Model:
     lease_counter: int = 0
     fault_counter: int = 0
     last_result: dict[str, Any] | None = None
+    session_counter: int = 0
+    start_client_nonce: str | None = None
+    start_op_id: str | None = None
+    start_bytes: bytes | None = None
+    start_response: dict[str, Any] | None = None
 
     @classmethod
     def from_initial(cls, initial: dict[str, Any], ids: dict[str, str]) -> "Model":
         session_id = ids["session"] if initial.get("session", True) else None
-        model = cls(boot_id=ids["boot"], session_id=session_id)
+        model = cls(
+            boot_id=ids["boot"],
+            session_id=session_id,
+            host_route="healthy" if session_id is not None else "unknown",
+        )
         for key, value in initial.items():
             if key != "session":
                 if not hasattr(model, key):
@@ -260,11 +317,35 @@ class Model:
         self.fault_counter += 1
         return f"{0xf000 + self.fault_counter:032x}"
 
+    def new_session_id(self) -> str:
+        self.session_counter += 1
+        return f"{0x4500 + self.session_counter:032x}"
+
+    def receive_safe_inputs(self) -> bool:
+        return (
+            self.commanded == "inactive"
+            and self.ptt_out == "inactive"
+            and self.inhibit == "closed"
+            and self.host_route == "healthy"
+            and self.device_audio == "healthy"
+            and self.profile == "ready"
+            and self.ble_link == "connected"
+            and self.protocol_session in {"active", "faulted"}
+        )
+
+    def refresh_rearm(self) -> None:
+        if self.first_fault_code != "continuous_cap" or not self.cap_release_reported:
+            self.rearm_started_ms = None
+        elif self.receive_safe_inputs():
+            if self.rearm_started_ms is None:
+                self.rearm_started_ms = self.now_ms
+        else:
+            self.rearm_started_ms = None
+
     def release(self, code: str, *, close_intent: bool = True) -> None:
         if self.lease_id is not None:
             self.expired_lease_ids.add(self.lease_id)
         self.commanded = "inactive"
-        self.ptt_out = "inactive"
         self.lease_id = None
         self.lease_deadline_ms = None
         self.continuous_started_ms = None
@@ -272,14 +353,12 @@ class Model:
         self.last_release_at_ms = self.now_ms
         if close_intent:
             self.intent_id = None
-        if self.safety_state != "fault_lockout":
+        if self.safety_state != "fault_lockout" and self.ptt_out == "inactive":
             self.safety_state = "receive_safe"
+        self.refresh_rearm()
 
     def lockout(self, code: str, *, op_id: str | None = None) -> None:
-        stuck_active = code == "output_stuck_active" and self.ptt_out == "active"
         self.release(code, close_intent=False)
-        if stuck_active:
-            self.ptt_out = "active"
         self.safety_state = "fault_lockout"
         self.protocol_session = (
             "faulted" if code == "protocol_fault" else self.protocol_session
@@ -288,6 +367,103 @@ class Model:
             self.first_fault_code = code
             self.first_fault_id = self.new_fault_id()
             self.first_fault_at_ms = self.now_ms
+        self.refresh_rearm()
+
+    def hello(self) -> None:
+        self.last_result = {
+            "type": "hello",
+            "device_id": DEVICE_ID,
+            "boot_id": self.boot_id,
+            "versions": [{"major": 0, "min_minor": 0, "max_minor": 0}],
+            "capabilities": sorted(REQUIRED_CAPABILITIES),
+            "profiles": ["kx2", "kx3"],
+            "command_frame_limit": DEVICE_FRAME_LIMIT,
+            "max_message_bytes": DEVICE_MAX_MESSAGE_BYTES,
+            "max_session_operations": MAX_SESSION_OPERATIONS,
+        }
+
+    def session_start(self, event: dict[str, Any]) -> None:
+        try:
+            request_bytes = canonical_session_start(event, self.boot_id)
+        except (KeyError, TypeError, ValueError):
+            self.last_result = self.error("malformed")
+            return
+        client_nonce = event.get("client_nonce")
+        op_id = event.get("op_id")
+        capabilities = event.get("required_capabilities")
+        if (
+            not is_hex_id(client_nonce)
+            or not is_hex_id(op_id)
+            or not isinstance(capabilities, list)
+            or any(not isinstance(item, str) for item in capabilities)
+            or len(capabilities) != len(set(capabilities))
+        ):
+            self.last_result = self.error("malformed")
+            return
+        if (
+            client_nonce == self.start_client_nonce or op_id == self.start_op_id
+        ) and self.start_bytes is not None:
+            if request_bytes == self.start_bytes:
+                self.last_result = copy.deepcopy(self.start_response)
+            else:
+                self.last_result = self.error("altered_duplicate")
+            return
+        if event.get("boot_id", self.boot_id) != self.boot_id:
+            self.last_result = self.error("stale_boot")
+            return
+        if event.get("select") != {"major": 0, "minor": 0}:
+            self.last_result = self.error("unsupported_version")
+            return
+        if not REQUIRED_CAPABILITIES.issuperset(capabilities):
+            self.last_result = self.error("missing_capability")
+            return
+        if not REQUIRED_CAPABILITIES.issubset(capabilities):
+            self.last_result = self.error("missing_capability")
+            return
+        client_limit = event.get("client_rx_frame_limit")
+        client_max = event.get("client_max_message_bytes")
+        if (
+            isinstance(client_limit, bool)
+            or not isinstance(client_limit, int)
+            or client_limit < 20
+        ):
+            self.last_result = self.error("transport_limit_too_small")
+            return
+        if (
+            isinstance(client_max, bool)
+            or not isinstance(client_max, int)
+            or client_max < DEVICE_MAX_MESSAGE_BYTES
+        ):
+            self.last_result = self.error("transport_limit_too_small")
+            return
+
+        self.release("session_replaced")
+        self.session_id = self.new_session_id()
+        self.next_seq = 1
+        self.cache.clear()
+        self.seq_to_op.clear()
+        self.intent_id = None
+        self.protocol_session = "active"
+        self.host_route = "unknown"
+        selected_limit = min(DEVICE_FRAME_LIMIT, client_limit)
+        response = self.ok(
+            {
+                "type": "session_started",
+                "session_id": self.session_id,
+                "selected": {"major": 0, "minor": 0},
+                "capabilities": sorted(REQUIRED_CAPABILITIES),
+                "device_rx_frame_limit": DEVICE_FRAME_LIMIT,
+                "device_tx_frame_limit": selected_limit,
+                "max_message_bytes": min(DEVICE_MAX_MESSAGE_BYTES, client_max),
+                "max_session_operations": MAX_SESSION_OPERATIONS,
+                "next_seq": 1,
+            }
+        )
+        self.start_client_nonce = client_nonce
+        self.start_op_id = op_id
+        self.start_bytes = request_bytes
+        self.start_response = copy.deepcopy(response)
+        self.last_result = response
 
     def process_time(self, target_ms: int) -> None:
         if target_ms < self.now_ms:
@@ -342,8 +518,6 @@ class Model:
 
     def execute_command(self, command: dict[str, Any]) -> dict[str, Any]:
         command_type = command.get("type")
-        if not isinstance(command_type, str):
-            return self.error("malformed")
         if command_type == "status_read":
             return self.ok({"type": command_type})
         if command_type == "host_audio_route_report":
@@ -353,6 +527,7 @@ class Model:
             self.host_route = health
             if health != "healthy" and self.safety_state == "tx_active":
                 self.release("host_route_unhealthy")
+            self.refresh_rearm()
             return self.ok({"type": command_type, "health": health})
         if command_type == "ptt_intent_begin":
             intent_id = command.get("intent_id")
@@ -450,8 +625,7 @@ class Model:
                 self.intent_id = None
                 self.last_release_code = "operator_release"
                 self.last_release_at_ms = self.now_ms
-                if self.ptt_out == "inactive" and self.inhibit == "closed":
-                    self.rearm_started_ms = self.now_ms
+                self.refresh_rearm()
                 return self.ok({"type": command_type, "released": True})
             if self.intent_id is not None and requested_intent != self.intent_id:
                 return self.error("intent_required")
@@ -465,8 +639,10 @@ class Model:
             if (
                 self.ptt_out != "inactive"
                 or self.inhibit != "closed"
+                or self.host_route != "healthy"
                 or self.device_audio != "healthy"
                 or self.profile != "ready"
+                or self.ble_link != "connected"
             ):
                 return self.error("rearm_incomplete")
             if self.first_fault_code == "continuous_cap":
@@ -486,19 +662,88 @@ class Model:
             self.rearm_started_ms = None
             self.intent_id = None
             return self.ok({"type": command_type, "recovered": True})
-        safe_radio = {
-            "radio_session_normalize",
-            "radio_identify",
-            "radio_firmware_read",
-            "radio_vfo_a_read",
-            "radio_vfo_a_set",
-            "radio_operating_state_read",
-            "radio_mode_read",
-            "radio_tx_state_read",
+        if command_type == "radio_profile_select":
+            if set(command) != {"type", "profile"} or command.get("profile") not in {
+                "kx2",
+                "kx3",
+            }:
+                return self.error("invalid_argument")
+            selected_profile = command["profile"]
+            self.release("profile_change")
+            self.radio_profile = selected_profile
+            self.profile = "validating"
+            self.session_id = None
+            self.protocol_session = "none"
+            self.host_route = "unknown"
+            self.next_seq = 1
+            self.cache.clear()
+            self.seq_to_op.clear()
+            return self.ok(
+                {
+                    "type": command_type,
+                    "profile": selected_profile,
+                    "state": "validating",
+                    "session_invalidated": True,
+                }
+            )
+        radio_results: dict[str, dict[str, Any]] = {
+            "radio_session_normalize": {
+                "type": "radio_session_normalize",
+                "auto_information": "off",
+                "k2_mode": "off",
+                "k3_extended_mode": "off",
+            },
+            "radio_identify": {
+                "type": "radio_identify",
+                "profile": self.radio_profile,
+                "product_code": 1 if self.radio_profile == "kx2" else 2,
+                "option_flags": ["a", "p", "f", "t", "b", "x", "i"],
+            },
+            "radio_firmware_read": {
+                "type": "radio_firmware_read",
+                "main": "03.14",
+                "dsp": None,
+            },
+            "radio_vfo_a_read": {
+                "type": "radio_vfo_a_read",
+                "frequency_hz": 7_100_000,
+            },
+            "radio_operating_state_read": {
+                "type": "radio_operating_state_read",
+                "frequency_hz": 7_100_000,
+                "tx_state": "receive",
+            },
+            "radio_mode_read": {
+                "type": "radio_mode_read",
+                "mode": "lsb",
+            },
+            "radio_tx_state_read": {
+                "type": "radio_tx_state_read",
+                "tx_state": "receive",
+            },
         }
-        if command_type in safe_radio:
+        if command_type == "radio_vfo_a_set":
+            frequency = command.get("frequency_hz")
+            if (
+                set(command) != {"type", "frequency_hz"}
+                or isinstance(frequency, bool)
+                or not isinstance(frequency, int)
+                or frequency > 99_999_999_999
+            ):
+                return self.error("invalid_argument")
             self.radio_io_count += 1
-            return self.ok({"type": command_type})
+            return self.ok(
+                {
+                    "type": command_type,
+                    "frequency_hz": frequency,
+                    "query_verified": True,
+                }
+            )
+        if command_type in radio_results:
+            if set(command) != {"type"}:
+                return self.error("invalid_argument")
+            self.radio_io_count += 1
+            return self.ok(radio_results[command_type])
         if command_type.startswith("radio_") or command_type == "raw_cat":
             return self.error("unsupported_radio_operation", radio_io=False)
         return self.error("unsupported_command")
@@ -515,6 +760,18 @@ class Model:
             return
         op_id = event.get("op_id")
         seq = event.get("seq")
+        command = event.get("command")
+        if (
+            not is_hex_id(op_id)
+            or not isinstance(seq, int)
+            or isinstance(seq, bool)
+            or not isinstance(command, dict)
+            or not isinstance(command.get("type"), str)
+            or not command["type"]
+        ):
+            self.lockout("protocol_fault", op_id=op_id)
+            self.last_result = self.error("malformed", "lockout")
+            return
         if event.get("boot_id", self.boot_id) != self.boot_id:
             self.lockout("protocol_fault", op_id=op_id)
             self.last_result = self.error("stale_boot", "lockout")
@@ -535,10 +792,6 @@ class Model:
             self.lockout("protocol_fault", op_id=op_id)
             self.last_result = self.error("stale_operation", "lockout")
             return
-        if not isinstance(seq, int) or isinstance(seq, bool):
-            self.lockout("protocol_fault", op_id=op_id)
-            self.last_result = self.error("malformed", "lockout")
-            return
         if seq < self.next_seq:
             self.lockout("protocol_fault", op_id=op_id)
             self.last_result = self.error("stale_operation", "lockout")
@@ -547,12 +800,10 @@ class Model:
             self.lockout("protocol_fault", op_id=op_id)
             self.last_result = self.error("out_of_order", "lockout")
             return
-        command = event.get("command")
-        if not isinstance(command, dict):
-            self.lockout("protocol_fault", op_id=op_id)
-            self.last_result = self.error("malformed", "lockout")
-            return
         response = self.execute_command(command)
+        if self.session_id is None:
+            self.last_result = response
+            return
         self.seq_to_op[seq] = op_id
         self.next_seq += 1
         self.cache[op_id] = CachedOperation(request_bytes, copy.deepcopy(response))
@@ -589,6 +840,10 @@ class Model:
             }
         elif action == "request":
             self.request(event)
+        elif action == "hello":
+            self.hello()
+        elif action == "session_start":
+            self.session_start(event)
         elif action == "malformed":
             self.lockout("protocol_fault")
             self.last_result = self.error("malformed", "lockout")
@@ -606,46 +861,66 @@ class Model:
             elif domain == "inhibit":
                 self.inhibit = value
                 if value == "open" and self.safety_state == "tx_active":
-                    self.ptt_out = "inactive"
                     self.release("inhibit_open")
+            elif domain == "profile":
+                self.profile = value
+                if value != "ready" and self.safety_state == "tx_active":
+                    self.release("profile_fault")
             else:
                 fail(f"unknown health domain {domain}")
+            self.refresh_rearm()
         elif action == "sense":
             self.ptt_out = event["value"]
             if self.commanded == "active" and self.ptt_out == "inactive":
                 self.lockout("output_failed_to_assert")
             elif self.commanded == "inactive" and self.ptt_out == "active":
                 self.lockout("output_stuck_active")
+            elif (
+                self.commanded == "inactive"
+                and self.ptt_out == "inactive"
+                and self.safety_state != "fault_lockout"
+            ):
+                self.safety_state = "receive_safe"
+            self.refresh_rearm()
         elif action == "fault":
             self.lockout(event["code"])
         elif action == "session_replace":
-            was_locked = self.safety_state == "fault_lockout"
             self.release("session_replaced")
             self.session_id = event.get("session_id", ids["session2"])
             self.next_seq = 1
             self.cache.clear()
             self.seq_to_op.clear()
             self.intent_id = None
-            if not was_locked:
-                self.safety_state = "receive_safe"
-                self.protocol_session = "active"
+            self.host_route = "unknown"
+            self.protocol_session = "active"
         elif action == "disconnect":
             self.release("ble_disconnect")
             self.session_id = None
             self.ble_link = "disconnected"
             self.protocol_session = "none"
+            self.host_route = "unknown"
             self.cache.clear()
             self.seq_to_op.clear()
+            self.refresh_rearm()
         elif action == "reconnect":
             self.ble_link = "connected"
             self.protocol_session = "none"
             self.session_id = None
+            self.host_route = "unknown"
+            self.refresh_rearm()
         elif action == "new_session":
             self.session_id = event.get("session_id", ids["session2"])
             self.protocol_session = "active"
+            self.host_route = "unknown"
             self.next_seq = 1
             self.cache.clear()
             self.seq_to_op.clear()
+            self.refresh_rearm()
+        elif action == "profile_validated":
+            if self.profile != "validating":
+                fail("profile_validated requires validating state")
+            self.profile = "ready"
+            self.refresh_rearm()
         elif action == "boot":
             self.release("boot_or_update")
             self.boot_id = event.get("boot_id", ids["boot2"])
@@ -657,14 +932,14 @@ class Model:
             self.intent_id = None
             self.first_fault_code = None
             self.first_fault_id = None
-            self.safety_state = "receive_safe"
+            self.host_route = "unknown"
         elif action == "watchdog":
             self.process_time(self.now_ms + 500)
             self.release("watchdog_reset")
             self.boot_id = ids["boot2"]
             self.session_id = None
             self.protocol_session = "none"
-            self.safety_state = "receive_safe"
+            self.host_route = "unknown"
         else:
             fail(f"unknown action {action}")
 
@@ -708,6 +983,7 @@ class Model:
             "first_fault_at_ms": self.first_fault_at_ms,
             "last_release_code": self.last_release_code,
             "last_release_at_ms": self.last_release_at_ms,
+            "rearm_started_ms": self.rearm_started_ms,
             "radio_io_count": self.radio_io_count,
             "last_result": self.last_result,
         }

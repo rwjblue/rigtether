@@ -210,9 +210,9 @@
           },
           "expect": {
             "next_seq": 5,
-            "safety_state": "receive_safe",
+            "safety_state": "tx_active",
             "commanded": "inactive",
-            "ptt_out": "inactive",
+            "ptt_out": "active",
             "lease_id": null,
             "owner": null,
             "intent_id": null,
@@ -500,12 +500,18 @@
           "ms": 500,
           "expect": {
             "now_ms": 500,
-            "safety_state": "receive_safe",
+            "safety_state": "tx_active",
             "commanded": "inactive",
+            "ptt_out": "active",
             "lease_id": null,
             "intent_id": null,
             "last_release_code": "lease_expired"
           }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {"safety_state": "receive_safe", "ptt_out": "inactive"}
         },
         {
           "action": "request",
@@ -557,12 +563,19 @@
           "expect": {
             "session_id": "45454545454545454545454545454545",
             "next_seq": 1,
-            "safety_state": "receive_safe",
+            "host_route": "unknown",
+            "safety_state": "tx_active",
             "commanded": "inactive",
+            "ptt_out": "active",
             "lease_id": null,
             "intent_id": null,
             "last_release_code": "session_replaced"
           }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {"safety_state": "receive_safe"}
         },
         {
           "action": "request",
@@ -611,11 +624,17 @@
             "protocol_session": "none",
             "session_id": null,
             "device_audio": "healthy",
-            "host_route": "healthy",
-            "safety_state": "receive_safe",
+            "host_route": "unknown",
+            "safety_state": "tx_active",
             "commanded": "inactive",
+            "ptt_out": "active",
             "last_release_code": "ble_disconnect"
           }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {"safety_state": "receive_safe", "ptt_out": "inactive"}
         },
         {
           "action": "reconnect",
@@ -632,6 +651,7 @@
           "expect": {
             "session_id": "45454545454545454545454545454545",
             "protocol_session": "active",
+            "host_route": "unknown",
             "next_seq": 1,
             "safety_state": "receive_safe",
             "lease_id": null
@@ -671,9 +691,16 @@
             "device_audio": "healthy",
             "ble_link": "connected",
             "protocol_session": "active",
-            "safety_state": "receive_safe",
+            "safety_state": "tx_active",
+            "commanded": "inactive",
+            "ptt_out": "active",
             "last_release_code": "host_route_unhealthy"
           }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {"safety_state": "receive_safe", "ptt_out": "inactive"}
         }
       ]
     },
@@ -709,9 +736,16 @@
             "device_audio": "unhealthy",
             "ble_link": "connected",
             "protocol_session": "active",
-            "safety_state": "receive_safe",
+            "safety_state": "tx_active",
+            "commanded": "inactive",
+            "ptt_out": "active",
             "last_release_code": "device_audio_unhealthy"
           }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {"safety_state": "receive_safe", "ptt_out": "inactive"}
         }
       ]
     },
@@ -769,9 +803,19 @@
           "value": "open",
           "expect": {
             "inhibit": "open",
+            "ptt_out": "active",
+            "commanded": "inactive",
+            "safety_state": "tx_active",
+            "last_release_code": "inhibit_open",
+            "first_fault_code": null
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {
             "ptt_out": "inactive",
             "safety_state": "receive_safe",
-            "last_release_code": "inhibit_open",
             "first_fault_code": null
           }
         }
@@ -1076,9 +1120,622 @@
             "boot_id": "12121212121212121212121212121212",
             "session_id": null,
             "protocol_session": "none",
-            "safety_state": "receive_safe",
+            "host_route": "unknown",
+            "safety_state": "tx_active",
             "commanded": "inactive",
+            "ptt_out": "active",
             "last_release_code": "watchdog_reset"
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {
+            "safety_state": "receive_safe",
+            "ptt_out": "inactive"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hello-and-session-negotiation",
+      "covers": [
+        "session_negotiation",
+        "unsupported_version",
+        "missing_capability",
+        "limit_negotiation",
+        "duplicate_session_start",
+        "stale_boot"
+      ],
+      "initial": {"session": false},
+      "steps": [
+        {
+          "action": "hello",
+          "expect": {
+            "session_id": null,
+            "host_route": "unknown",
+            "last_result": {
+              "type": "hello",
+              "boot_id": "11111111111111111111111111111111",
+              "command_frame_limit": 185,
+              "max_message_bytes": 1024
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000001",
+          "op_id": "30000000000000000000000000000001",
+          "select": {"major": 1, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 64,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": null,
+            "last_result": {
+              "ok": false,
+              "error": {"code": "unsupported_version"}
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000002",
+          "op_id": "30000000000000000000000000000002",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": ["ordered_operations"],
+          "client_rx_frame_limit": 64,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": null,
+            "last_result": {
+              "ok": false,
+              "error": {"code": "missing_capability"}
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000003",
+          "op_id": "30000000000000000000000000000003",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 19,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": null,
+            "last_result": {
+              "ok": false,
+              "error": {"code": "transport_limit_too_small"}
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "boot_id": "12121212121212121212121212121212",
+          "client_nonce": "20000000000000000000000000000004",
+          "op_id": "30000000000000000000000000000004",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 64,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": null,
+            "last_result": {
+              "ok": false,
+              "error": {"code": "stale_boot"}
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000005",
+          "op_id": "30000000000000000000000000000005",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 64,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": "00000000000000000000000000004501",
+            "next_seq": 1,
+            "host_route": "unknown",
+            "protocol_session": "active",
+            "last_result": {
+              "ok": true,
+              "result": {
+                "device_rx_frame_limit": 185,
+                "device_tx_frame_limit": 64,
+                "max_message_bytes": 1024,
+                "next_seq": 1
+              }
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000005",
+          "op_id": "30000000000000000000000000000005",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 64,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": "00000000000000000000000000004501",
+            "next_seq": 1,
+            "last_result": {"ok": true}
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000005",
+          "op_id": "30000000000000000000000000000005",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 65,
+          "client_max_message_bytes": 4096,
+          "expect": {
+            "session_id": "00000000000000000000000000004501",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "altered_duplicate"}
+            }
+          }
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000006",
+          "op_id": "30000000000000000000000000000006",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 100,
+          "client_max_message_bytes": 2048,
+          "expect": {
+            "session_id": "00000000000000000000000000004502",
+            "next_seq": 1,
+            "host_route": "unknown",
+            "last_release_code": "session_replaced",
+            "last_result": {
+              "ok": true,
+              "result": {"device_tx_frame_limit": 100}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "malformed-command-releases-and-locks",
+      "covers": ["malformed_command", "release_sensing"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000201",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000202",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000203",
+          "seq": 3,
+          "command": {},
+          "expect": {
+            "next_seq": 3,
+            "commanded": "inactive",
+            "ptt_out": "active",
+            "safety_state": "fault_lockout",
+            "first_fault_code": "protocol_fault",
+            "last_result": {
+              "ok": false,
+              "error": {
+                "code": "malformed",
+                "safety_effect": "lockout"
+              }
+            }
+          }
+        },
+        {
+          "action": "sense",
+          "value": "active",
+          "expect": {
+            "ptt_out": "active",
+            "first_fault_code": "protocol_fault"
+          }
+        }
+      ]
+    },
+    {
+      "id": "release-does-not-fabricate-sense",
+      "covers": ["release_sensing", "output_stuck_active"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000211",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000212",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000213",
+          "seq": 3,
+          "command": {
+            "type": "ptt_release",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "reason": "operator_release"
+          },
+          "expect": {
+            "commanded": "inactive",
+            "ptt_out": "active",
+            "lease_id": null,
+            "safety_state": "tx_active"
+          }
+        },
+        {
+          "action": "sense",
+          "value": "active",
+          "expect": {
+            "safety_state": "fault_lockout",
+            "ptt_out": "active",
+            "first_fault_code": "output_stuck_active"
+          }
+        }
+      ]
+    },
+    {
+      "id": "exact-typed-radio-results",
+      "covers": ["typed_radio_schema", "cat_allowlist"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000221",
+          "seq": 1,
+          "command": {"type": "radio_session_normalize"},
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_session_normalize",
+                "auto_information": "off",
+                "k2_mode": "off",
+                "k3_extended_mode": "off"
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000222",
+          "seq": 2,
+          "command": {"type": "radio_identify"},
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_identify",
+                "profile": "kx2",
+                "product_code": 1,
+                "option_flags": ["a", "p", "f", "t", "b", "x", "i"]
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000223",
+          "seq": 3,
+          "command": {"type": "radio_firmware_read"},
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_firmware_read",
+                "main": "03.14",
+                "dsp": null
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000224",
+          "seq": 4,
+          "command": {"type": "radio_vfo_a_read"},
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_vfo_a_read",
+                "frequency_hz": 7100000
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000225",
+          "seq": 5,
+          "command": {
+            "type": "radio_vfo_a_set",
+            "frequency_hz": 7200000
+          },
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_vfo_a_set",
+                "frequency_hz": 7200000,
+                "query_verified": true
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000226",
+          "seq": 6,
+          "command": {"type": "radio_operating_state_read"},
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_operating_state_read",
+                "frequency_hz": 7100000,
+                "tx_state": "receive"
+              }
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000227",
+          "seq": 7,
+          "command": {"type": "radio_mode_read"},
+          "expect": {
+            "last_result": {
+              "ok": true,
+              "result": {"type": "radio_mode_read", "mode": "lsb"}
+            }
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000228",
+          "seq": 8,
+          "command": {"type": "radio_tx_state_read"},
+          "expect": {
+            "radio_io_count": 8,
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_tx_state_read",
+                "tx_state": "receive"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "profile-selection-releases-validates-and-invalidates",
+      "covers": ["profile_selection", "release_sensing"],
+      "steps": [
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000231",
+          "seq": 1,
+          "command": {
+            "type": "ptt_intent_begin",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000232",
+          "seq": 2,
+          "command": {
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": 500
+          }
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000233",
+          "seq": 3,
+          "command": {"type": "radio_profile_select", "profile": "kx3"},
+          "expect": {
+            "session_id": null,
+            "protocol_session": "none",
+            "host_route": "unknown",
+            "radio_profile": "kx3",
+            "profile": "validating",
+            "commanded": "inactive",
+            "ptt_out": "active",
+            "last_release_code": "profile_change",
+            "last_result": {
+              "ok": true,
+              "result": {
+                "type": "radio_profile_select",
+                "profile": "kx3",
+                "state": "validating",
+                "session_invalidated": true
+              }
+            }
+          }
+        },
+        {
+          "action": "sense",
+          "value": "inactive",
+          "expect": {
+            "ptt_out": "inactive",
+            "safety_state": "receive_safe",
+            "first_fault_code": null
+          }
+        },
+        {
+          "action": "profile_validated",
+          "expect": {"profile": "ready", "session_id": null}
+        },
+        {
+          "action": "session_start",
+          "client_nonce": "20000000000000000000000000000031",
+          "op_id": "30000000000000000000000000000031",
+          "select": {"major": 0, "minor": 0},
+          "required_capabilities": [
+            "ordered_operations",
+            "typed_radio_v0",
+            "ptt_leases_v0",
+            "independent_health_v0",
+            "first_cause_fault_v0"
+          ],
+          "client_rx_frame_limit": 185,
+          "client_max_message_bytes": 1024,
+          "expect": {
+            "session_id": "00000000000000000000000000004501",
+            "radio_profile": "kx3",
+            "profile": "ready",
+            "host_route": "unknown",
+            "next_seq": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "continuous-cap-rearm-restarts-after-unsafe-input",
+      "covers": ["rearm_continuity", "rearm", "recovery"],
+      "initial": {
+        "safety_state": "fault_lockout",
+        "first_fault_code": "continuous_cap",
+        "first_fault_id": "0000000000000000000000000000f111",
+        "first_fault_at_ms": 0,
+        "cap_release_reported": true,
+        "rearm_started_ms": 0
+      },
+      "steps": [
+        {
+          "action": "advance",
+          "ms": 500,
+          "expect": {"rearm_started_ms": 0}
+        },
+        {
+          "action": "set_health",
+          "domain": "device_audio",
+          "value": "unhealthy",
+          "expect": {"rearm_started_ms": null}
+        },
+        {
+          "action": "advance",
+          "ms": 600
+        },
+        {
+          "action": "set_health",
+          "domain": "device_audio",
+          "value": "healthy",
+          "expect": {"rearm_started_ms": 1100}
+        },
+        {
+          "action": "advance",
+          "ms": 999
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000241",
+          "seq": 1,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f111"
+          },
+          "expect": {
+            "safety_state": "fault_lockout",
+            "last_result": {
+              "ok": false,
+              "error": {"code": "rearm_incomplete"}
+            }
+          }
+        },
+        {
+          "action": "advance",
+          "ms": 1
+        },
+        {
+          "action": "request",
+          "op_id": "00000000000000000000000000000242",
+          "seq": 2,
+          "command": {
+            "type": "safety_recover",
+            "fault_id": "0000000000000000000000000000f111"
+          },
+          "expect": {
+            "safety_state": "receive_safe",
+            "first_fault_code": null,
+            "last_result": {"ok": true}
           }
         }
       ]
