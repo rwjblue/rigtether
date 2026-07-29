@@ -66,7 +66,7 @@ or request behavior only through the named boundary.
 | Platform-neutral host core | Host library contract | Owns device discovery state, capability negotiation, session establishment, ordered operations, typed radio operations, status reduction, and the 250 ms lease-renewal target. It stops renewing on intent, route, lifecycle, or control uncertainty. Firmware deadlines remain the safety guarantee. |
 | USB Audio function | Device USB/audio firmware | Exposes class-compliant full-duplex media and reports device-observed configuration, stream, clock, and buffer health to the audio service. It carries no control or PTT meaning. |
 | BLE transport adapter | Device BLE firmware | Exposes the RigTether GATT service, negotiates ATT limits, and moves bounded protocol messages. BLE connection state alone is neither a session nor transmit authority. |
-| Protocol and session core | Host-neutral device firmware plus the v0 contract | Owns version/capability negotiation, `boot_id`, session replacement, operation ordering/idempotency, typed commands, status and errors. Issue #6 owns its wire representation and vectors. |
+| Protocol and session core | Host-neutral device firmware plus the v0 contract | Owns version/capability negotiation, session replacement, operation ordering/idempotency, typed commands, status and errors. It publishes and validates the current `boot_id` supplied by the boot/update coordinator but never creates or rotates it. Issue #6 owns its wire representation and vectors. |
 | Audio service | Device audio firmware | Owns media routing between USB and the conversion boundary, sample-format conversion, gain/mute control, and device-observed transmit-audio health. Silence is valid media; stream/clock/buffer failure is not. It can require release but cannot assert PTT. |
 | Audio conversion boundary | Replaceable bench hardware plus its driver | Owns codec or converter attachment, DC blocking, filtering, bounded gain/attenuation, protection, and loopback/test access. Exact implementation and formats belong to #10 and measured radio values to #13. |
 | Radio service | Host-neutral firmware | Owns the selected radio profile, harness validation state, typed CAT adapter, and mapping of generic capabilities to KX2/KX3 behavior. It can deny or release PTT but cannot energize it directly. |
@@ -76,7 +76,7 @@ or request behavior only through the named boundary.
 | PTT safety service | Dedicated high-priority firmware service | Sole software owner of the controllable PTT output, safety state, monotonic lease and continuous-cap clocks, output command, inhibit and output-sense inputs, fault lockout, and safety event log. It consumes qualified health inputs and never waits for CAT or host acknowledgement to release. |
 | Independent watchdog | Hardware watchdog configured by the safety service | Receives a heartbeat only after the safety service checks deadlines, session, profile, required health, inhibit, and sensed output. Its reset path exposes the passively inactive PTT state within ADR 0004's bound. |
 | PTT electrical boundary | Replaceable bench hardware | Provides inactive reset/power bias, one normally open controllable output, current limiting/protection, a physically independent normally open series TX inhibit, radio-side sensing downstream of both, and test points on both sides of the inhibit. |
-| Boot/update coordinator | Firmware and bootloader | Releases and mutes before reset, profile changes, or update; rejects unsafe transitions; starts with a new `boot_id` and no session or lease. Bootloader and unconfigured pins rely on passive inactive hardware, never restored software intent. |
+| Boot/update coordinator | Firmware and bootloader | Sole creator of one immutable `boot_id` per firmware boot, before any session or lease can exist. It releases and mutes before reset, profile changes, or update and rejects unsafe transitions. Bootloader and unconfigured pins rely on passive inactive hardware, never restored software intent. |
 | Diagnostics service | Firmware with host tooling | Publishes bounded, versioned status and trace records without becoming a control backdoor. Desktop-only debug access may exist but is not part of the iPhone contract and cannot bypass the typed protocol or safety service. |
 
 ## Host-portable boundary
@@ -143,6 +143,11 @@ The v0 protocol negotiates before accepting ordinary commands:
 5. Capabilities expose typed operations. Unsupported or non-allowlisted CAT operations
    fail locally before bytes reach the radio.
 
+The boot/update coordinator creates `boot_id` exactly once for a firmware boot and
+exposes it as immutable boot context. The safety service consumes that value as part of
+every lease-owner tuple. The protocol/session core publishes it and rejects mismatches;
+neither component creates, rotates, or independently caches a different boot epoch.
+
 For M1, session normalization sends and verifies `AI0`, `K20`, and `K30`. The typed CAT
 surface is `OM` identification/options, `RVM` and optional `RVD` firmware reads, `FA`
 read and query-verified set, plus read-only `IF`, `MD`, and `TQ`. The complete response,
@@ -182,13 +187,15 @@ complete radio transmit state.
 ### Startup and negotiation
 
 1. Passive hardware holds PTT open and TX audio muted while power and reset settle.
-2. The safety service configures inactive output and inputs, starts its monotonic clock
-   and watchdog checks, creates a fresh `boot_id`, clears any persisted authority, and
-   enters `RECEIVE_SAFE`.
-3. Audio, BLE, CAT, profile, and diagnostics services start independently. Startup
+2. The boot/update coordinator creates one fresh `boot_id` before enabling any
+   session, lease, or host-facing service. The value remains immutable until reset.
+3. The safety service configures inactive output and inputs, consumes the current
+   `boot_id`, starts its monotonic clock and watchdog checks, clears any persisted
+   authority, and enters `RECEIVE_SAFE`.
+4. Audio, BLE, CAT, profile, and diagnostics services start independently. Startup
    failures remain receive-safe and are reported when a control session becomes
    available.
-4. A BLE connection negotiates capabilities and creates a fresh session. USB media may
+5. A BLE connection negotiates capabilities and creates a fresh session. USB media may
    enumerate before or after it; neither ordering is assumed.
 
 ### Normal receive and transmit
@@ -225,16 +232,17 @@ identity and cannot extend or revive authority.
 
 ### Reset, profile change, and firmware update
 
-- Reset or watchdog expiry exposes passive inactive hardware, creates a new `boot_id`,
-  and never restores session, lease, or intent.
+- Reset or watchdog expiry exposes passive inactive hardware. On the next boot, the
+  boot/update coordinator creates a new `boot_id`; no session, lease, or intent is
+  restored.
 - Profile or harness change is allowed only after release and mute. It invalidates the
   session, validates the new KX2/KX3 profile and exactly one PTT binding, and requires
   a fresh negotiation. Ambiguity enters lockout.
 - Update is rejected while output is sensed active. The update coordinator releases,
   mutes, invalidates the session, and requires the physical inhibit open for the M1
   procedure before bootloader entry. Bootloader, interrupted update, rollback, and
-  first boot remain passively inactive. A successful update creates a new `boot_id`
-  and requires fresh negotiation.
+  first boot remain passively inactive. After a successful update, the rebooted
+  coordinator creates a new `boot_id` and requires fresh negotiation.
 
 ### Fault lockout and recovery
 
