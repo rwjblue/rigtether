@@ -13,5 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate repository and issue plan
-        run: python3 tools/check_repo.py
+      - uses: jdx/mise-action@v3
+      - name: Run repository verification
+        run: mise run ci

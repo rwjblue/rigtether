@@ -73,6 +73,8 @@ KX3 interoperability is a required validation target, not an assumption.
 ## Repository layout
 
 - [`docs/`](docs/README.md) — product, architecture, safety, roadmap, and decisions
+- [`crates/elecraft-cat/`](crates/elecraft-cat/README.md) — typed KX2/KX3 CAT core,
+  document-derived fixtures, and deterministic simulator
 - [`hardware/`](hardware/README.md) — future KiCad designs, harnesses, and mechanics
 - [`firmware/`](firmware/README.md) — future embedded software
 - [`ios/`](ios/README.md) — future Swift package and reference application

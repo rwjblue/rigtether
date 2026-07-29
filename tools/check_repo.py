@@ -136,8 +136,13 @@ for issue_id in by_id:
 
 # Basic text hygiene for project-authored source. License texts are excluded.
 text_suffixes = {".md", ".py", ".json", ".yml", ".yaml", ".sh", ".toml"}
+generated_parts = {".git", ".jj", "node_modules", "target"}
 for path in ROOT.rglob("*"):
-    if not path.is_file() or "LICENSES" in path.parts:
+    if (
+        not path.is_file()
+        or "LICENSES" in path.parts
+        or generated_parts.intersection(path.parts)
+    ):
         continue
     if path.suffix not in text_suffixes and path.name not in {"LICENSE", "NOTICE", "CODEOWNERS", "check", "ci", "publish", "bootstrap-github"}:
         continue
