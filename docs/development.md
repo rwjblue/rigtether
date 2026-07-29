@@ -8,7 +8,16 @@ The repository's current checks require:
 - [mise](https://mise.jdx.dev/) for task discovery; and
 - GitHub CLI (`gh`) only when publishing the bootstrap plan.
 
-No firmware, iOS, Rust, or KiCad toolchain is selected by the initial scaffold.
+The initial M1 firmware probe is pinned to nRF Connect SDK v3.3.0 for reproducible
+build evidence. Its exact development board, external audio module, USB descriptors,
+resource ceilings, staged fixtures, and toolchain risks are defined in the
+[M1 development-platform specification](m1-development-platform.md). The repository
+does not yet install that toolchain; issue #12 owns its first implementation and
+toolchain-specific verification.
+
+No production firmware, iOS, Rust, or KiCad toolchain is selected. Reusable protocol
+logic should continue to prefer Rust where it does not compromise the accepted USB,
+BLE, or maintenance constraints.
 
 ## Verification
 

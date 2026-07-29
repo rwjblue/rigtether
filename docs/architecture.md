@@ -68,7 +68,7 @@ or request behavior only through the named boundary.
 | BLE transport adapter | Device BLE firmware | Exposes the RigTether GATT service, negotiates ATT limits, and moves bounded protocol messages. BLE connection state alone is neither a session nor transmit authority. |
 | Protocol and session core | Host-neutral device firmware plus the [v0 contract](../protocol/README.md) | Owns version/capability negotiation, session replacement, operation ordering/idempotency, typed commands, status and errors. It publishes and validates the current `boot_id` supplied by the boot/update coordinator but never creates or rotates it. The contract owns its wire representation and vectors. |
 | Audio service | Device audio firmware | Owns media routing between USB and the conversion boundary, sample-format conversion, gain/mute control, and device-observed transmit-audio health. Silence is valid media; stream/clock/buffer failure is not. It can require release but cannot assert PTT. |
-| Audio conversion boundary | Replaceable bench hardware plus its driver | Owns codec or converter attachment, DC blocking, filtering, bounded gain/attenuation, protection, and loopback/test access. Exact implementation and formats belong to #10 and measured radio values to #13. |
+| Audio conversion boundary | Replaceable bench hardware plus its driver | Owns codec or converter attachment, DC blocking, filtering, bounded gain/attenuation, protection, and loopback/test access. ADR 0007 fixes the M1 development implementation/formats; measured radio values remain #13 evidence. |
 | Radio service | Host-neutral firmware | Owns the selected radio profile, harness validation state, typed CAT adapter, and mapping of generic capabilities to KX2/KX3 behavior. It can deny or release PTT but cannot energize it directly. |
 | CAT adapter | Radio service and reusable CAT core | Implements only the source-backed typed allowlist from the [KX2/KX3 specification](elecraft-kx2-kx3-interface.md), including query-after-set verification. Raw CAT and every command capable of entering or sustaining transmit are rejected before radio I/O. `IF` and `TQ` are observations, not PTT authority or substitutes for sensed `PTT OUT`. |
 | Radio profiles | Radio service configuration | KX2 and KX3 are separate profiles. Each binds audio, CAT, settings, diagnostics, and exactly one normally open hardware-PTT path. Profiles contain documented values and explicit unknowns; they do not fill measurement-required fields with typical values. |
@@ -95,12 +95,13 @@ future Android adapter can translate its platform APIs into the same events. Nei
 adapter exports platform errors, callback ordering, state-restoration tokens, or
 background scheduling as protocol semantics.
 
-M1 must prefer USB Audio Class descriptors and PCM formats inside Android's documented
-USB Audio Class 1 host-mode subset when that also satisfies the iPhone proof. Issue #10
-may select a different feasibility format only by recording contradictory evidence, a
-compatibility cost, a credible Android alternate path, and an explicit owner decision.
-Until representative-device testing, this is an implementability constraint, not an
-Android support claim.
+M1 uses the ADR 0007 proposal: full-speed USB Audio Class 1.0 with one mono signed
+16-bit 48 kHz PCM stream in each direction. That format is inside Android's documented
+USB Audio Class 1 host-mode subset. Exact descriptors, terminals, endpoints, clock
+discipline, and health thresholds are fixed as #18 validation inputs in the
+[M1 development-platform specification](m1-development-platform.md). Until
+representative-device testing, this is an implementability constraint, not an Android
+or iPhone support claim.
 
 ## Independent transport and audio health
 
@@ -116,9 +117,9 @@ USB media and BLE control have separate state machines and diagnostics.
 | Inhibit and output health | PTT safety service, from hardware inputs | Inhibit denies assertion; commanded/sensed mismatch releases, latches, and reports `FAULT_LOCKOUT` | Radio-disconnected electrical fixture and forced faults in #13 |
 
 Audio sample values, including silence, clipping, or arbitrary tones, can never assert
-PTT. Issue #10 selects the exact hardware-dependent health thresholds and buffering
-budgets. It may refine when an audio condition is declared faulty, but it may not make
-sample content or host timing transmit authority.
+PTT. ADR 0007 selects the initial hardware-dependent health thresholds and buffering
+budgets. Issues #12/#18 test them; no result may make sample content or host timing
+transmit authority.
 
 USB failure does not imply BLE failure: control, receive-safe CAT reads, diagnostics,
 and recovery may remain available, but transmit is denied. BLE failure does not imply
@@ -310,7 +311,7 @@ Loopback and fixture support includes:
 | Responsibility | Primary verification before live radio |
 | --- | --- |
 | iOS adapter containment | Compile-time module boundary plus synthetic permission, route, lifecycle, BLE reconnect, and state-restoration tests; host/protocol fixtures contain no Apple types |
-| Android path preservation | Build or parse fixtures with a non-Swift harness; compare #10 descriptors/formats with the Android UAC1 baseline; escalate any exception |
+| Android path preservation | Build or parse fixtures with a non-Swift harness; compare ADR 0007 descriptors/formats with the Android UAC1 baseline; escalate any exception |
 | USB Audio transport and conversion | Descriptor inspection, enumeration records, independent detach/clock/buffer fault injection, digital/analog loopback, format conversion and mute tests |
 | BLE transport | Second GATT implementation or simulator, negotiated-size boundaries, blocked traffic, disconnect/reconnect, duplicate and ordering faults |
 | Protocol/capabilities | [Version/capability/session vectors](../protocol/vectors/v0.json) consumed independently by Swift and the platform-neutral harness |
@@ -326,27 +327,40 @@ choices. Architecture tests may use fixtures and explicit unknown parameters; th
 must not invent KX2/KX3 voltage, impedance, bias, threshold, ground, insertion, or
 timing results.
 
-## M1 platform requirements and deferred choices
+## M1 development-platform binding
 
-Issue #10 may compare and select bench parts only after satisfying these requirements:
+ADR 0007 selects a Nordic nRF5340 DK plus a replaceable external Pmod I2S2 only for the
+instrumentable M1 probe. The network core runs the BLE controller; the application
+core owns USB, the external-I²S audio service and conversion, protocol services, typed
+CAT, diagnostics, monotonic lease timing, watchdog integration, and the sole PTT
+safety service. This allocation does not prove simultaneous operation or remove the
+application core as a common-mode fault.
+
+The selected resources and staged probe must demonstrate:
 
 - simultaneous class-compliant full-duplex USB Audio device operation and BLE
-  peripheral/GATT server operation with independently injectable failures;
-- a firmware-owned monotonic timer and independent watchdog capable of the accepted
-  safety bounds;
-- an observable audio conversion interface with deterministic mute, routing, format
-  conversion, clock/buffer health, and loopback;
-- enough isolated GPIO/peripheral resources for CAT, one normally open PTT command,
-  inhibit input where sensed, radio-side output sensing, profile/harness state, and
-  test instrumentation;
+  peripheral/GATT server operation with independently observable and injectable
+  failures;
+- a dedicated firmware-monotonic lease timer and separately configured watchdog
+  capable of the accepted safety bounds;
+- an observable external-I²S conversion interface with deterministic mute, format
+  conversion, USB-disciplined clock/buffer health, and digital/analog loopback;
+- separate CAT EasyDMA and test access for one normally open PTT command, physical TX
+  inhibit, downstream radio-side output sensing, profile/harness state, and fault
+  instrumentation;
 - passive receive-safe behavior through reset, brownout, bootloader, and update; and
-- documented USB power domains with no assumption that the iPhone powers the entire
-  interface.
+- externally powered and direct-phone bench paths using documented limits, with no
+  assumption that an iPhone powers or accepts the interface.
 
-Still deferred are production components, final USB topology and formats, codec,
-switch/sense parts, PCB, enclosure, harness identification technology, security policy
-beyond the bounded local M1 contract, stable public SDK, Android application, and
-additional radios.
+ADR 0007 fixes development descriptors, conversion, buffering, resource ceilings,
+power experiments, BOM, and fallback triggers in the linked specification. Issues
+#12, #13, and #18 must preserve its evidence labels: documented capability is not
+measured operation.
+
+Still deferred are production components, Rev A USB topology and codec, radio-side
+analog and switch/sense parts, PCB, enclosure, harness identification technology,
+security policy beyond the bounded local M1 contract, stable public SDK, Android
+application, and additional radios.
 
 The USB Audio plus USB MIDI alternative remains conditional on ADR 0003's validation
 trigger. The primary architecture does not include MIDI. If #18 supplies triggering

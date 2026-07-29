@@ -4,6 +4,7 @@
 
 - [Product contract](product.md)
 - [Feasibility architecture](architecture.md)
+- [M1 development platform and instrumentable probe](m1-development-platform.md)
 - [Hardware and transmit safety](hardware-safety.md)
 - [Elecraft KX2/KX3 radio interfaces](elecraft-kx2-kx3-interface.md)
 - [Interoperability targets](interoperability.md)

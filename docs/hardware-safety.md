@@ -181,7 +181,7 @@ means the last renewal accepted by firmware, not sent by the host.
 | Firmware-update request, bootloader entry, or failed update | Reject update while output is sensed active; otherwise enter update with inhibit active and PTT passively inactive | Hardware bias; bootloader and firmware | Bootloader and rollback behavior need implementation evidence |
 | CAT timeout, parse error, or unexpected response | Release and lock out because radio configuration/state is uncertain; PTT release cannot wait for CAT | Firmware PTT path independent of CAT | Radio may remain in TX if keyed independently of RigTether |
 | Unsafe raw CAT transmit command | Reject before radio I/O; no lease or output change | Protocol and radio-profile allowlist | Programmer-reference command inventory must be maintained |
-| Audio samples, silence, clipping, underrun, or stream start | Never assert PTT; a declared transmit-audio health fault releases an active lease | Hardware/firmware separation and [ADR 0005] ownership | Hardware-dependent `audio healthy` thresholds belong to #10 |
+| Audio samples, silence, clipping, underrun, or stream start | Never assert PTT; a declared transmit-audio health fault releases an active lease | Hardware/firmware separation and [ADR 0005] ownership | ADR 0007 fixes initial `audio healthy` thresholds; #12/#18 validate detection and timing |
 | Controllable output commanded active but sensed inactive | Release command, mute, latch fault, and report mismatch; do not retry | Output sensing and firmware | Could be open harness, inhibit, failed switch, or sensor; diagnosis needs bench evidence |
 | Controllable output commanded inactive but sensed active | Reassert inactive, mute, latch fault, report urgently; operator opens physical inhibit | Output sensing; physical inhibit | A shorted PTT device or conductor can sustain transmit until physically interrupted |
 | Output sensor stuck or misleading | Sensor must not create authority; cross-check at test point during validation | Hardware independence; tests | A false inactive reading can hide a stuck output; single-fault diagnostic coverage is not yet proven |
@@ -242,9 +242,12 @@ Sources were accessed 2026-07-29.
   Bias, impedance, thresholds, ground relationships, and insertion behavior not
   published by Elecraft remain explicitly unmeasured and human-required.
 - [ADR 0005] assigns independent control, host-route, device-media, CAT/profile,
-  inhibit, and output health to explicit owners. Issue #10 must select the
-  hardware-dependent audio-health thresholds and prove the timing path from detected
-  fault to the safety service.
+  inhibit, and output health to explicit owners. [ADR 0007] and the
+  [M1 development-platform specification](m1-development-platform.md) select initial
+  audio-health thresholds. Issue #12 must implement and software-test the
+  fault-to-safety-service path; #18 must measure media/clock detection under
+  simultaneous current-device transport; and #13 must measure the hardware release
+  path within ADR 0004's bounds.
 - The [v0 control contract](../protocol/README.md) defines strict JSON encoding,
   runtime GATT fragmentation, 128-bit identities, session establishment,
   acknowledgement, errors, status fields, and
@@ -252,8 +255,10 @@ Sources were accessed 2026-07-29.
 - Issue #13 must validate inactive bias, reset/brownout behavior, watchdog release,
   lease timing, continuous cap, output sensing, inhibit independence, loading,
   protection, and the stuck-active fixture fault.
-- MCU, watchdog, output switch, sense circuit, inhibit implementation, and connectors
-  remain unselected. No component is qualified by this analysis.
+- ADR 0007 selects an nRF5340 DK and nominal 250 ms application watchdog only for the
+  replaceable M1 probe. Production MCU/watchdog, output switch, sense circuit, inhibit
+  implementation, protection, and connectors remain unselected. No component is
+  physically qualified by this analysis.
 - Actual radio behavior, RF output, app/device timing, and acceptable operational
   ergonomics remain physical results to measure. A proposed change to a safety bound
   requires evidence and an explicit ADR update.

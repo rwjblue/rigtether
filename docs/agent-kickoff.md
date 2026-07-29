@@ -7,9 +7,10 @@ owner-approved M1 work remains decomposed into dependency-ordered, bounded contr
 
 Choose an open issue carrying `agent-ready` and confirm its dependencies are closed.
 The M0 baseline has landed and was approved in issue #7; do not reopen it without new
-contradictory evidence. The first independent M1 handoffs are issue #9, the typed
-Elecraft CAT core and fixtures, and issue #10, the bench-prototype platform decision.
-The GitHub queue remains authoritative for current readiness.
+contradictory evidence. Issue #10 has landed as ADR 0007 and the M1
+development-platform specification. The current agent-ready M1 handoff is issue #9,
+the typed Elecraft CAT core and fixtures. The GitHub queue remains authoritative for
+current readiness.
 
 Example prompt:
 
@@ -25,12 +26,15 @@ mise run ci, land the work, post completion evidence, close the issue, and reass
 issues it unblocks.
 ```
 
-## Parallel work
+## Dependency order
 
-The CAT core in #9 and platform decision in #10 may proceed independently. Do not hand
-off firmware, the iOS probe, transport characterization, bench hardware, or integration
-until every listed dependency has landed. A readiness label is not authorization;
-each issue still needs an explicit handoff.
+Issue #12 remains blocked on #9. Reassess it for `agent-ready` only after #9 lands and
+its bounded firmware contract still matches ADR 0007. Issues #13 and #18 now have
+their listed dependencies closed, but both remain `human-required` and must never
+receive `agent-ready`; an agent may prepare instructions and artifacts only within an
+explicit handoff that preserves the physical-evidence boundary. The iOS probe and
+integration remain blocked by their listed dependencies. A readiness label is not
+authorization; each issue still needs an explicit handoff.
 
 ## Human boundaries
 
