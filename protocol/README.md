@@ -213,7 +213,8 @@ Acceptance atomically performs these steps:
 2. invalidate the old protocol session and its operations;
 3. create a fresh `session_id`;
 4. reset the new session's expected sequence to `1`; and
-5. publish a receive-safe status before any PTT acquire can succeed.
+5. reset `host_usb_audio_route` to `unknown`; and
+6. publish a receive-safe status before any PTT acquire can succeed.
 
 The response contains `session_id`, selected version/capabilities,
 `device_rx_frame_limit`, `device_tx_frame_limit`, negotiated
@@ -228,7 +229,9 @@ session.
 BLE reconnect, a restored peripheral object, or a second central must use a new
 `session_start`; none inherits the prior session. A detected BLE disconnect
 immediately invalidates the session and requests release. Silent loss is still bounded
-by the current device lease deadline.
+by the current device lease deadline. Because host-route health is a session-scoped
+claim, every accepted start requires the new central to send a fresh
+`host_audio_route_report` before `ptt_acquire` can succeed.
 
 ## Ordered operations and acknowledgement
 
@@ -312,19 +315,42 @@ There is no raw CAT operation in v0.0. The protocol/session core recognizes only
 typed command names, and the radio adapter emits only the mapped CAT in the
 [source-backed interface specification](../docs/elecraft-kx2-kx3-interface.md#m1-cat-allowlist):
 
-| Typed command | CAT owned by radio adapter | Result |
+| Typed command | CAT owned by radio adapter | Exact result shape |
 | --- | --- | --- |
-| `radio_session_normalize` | `AI0;`/`AI;`, `K20;`/`K2;`, `K30;`/`K3;` | Verified normalized session |
-| `radio_identify` | `OM;` | Typed product/options fields |
-| `radio_firmware_read` | `RVM;`, optional `RVD;` | Main and optional DSP version strings |
-| `radio_vfo_a_read` | `FA;` | `frequency_hz` |
-| `radio_vfo_a_set` | validated `FAxxxxxxxxxxx;`, then `FA;` | Query-verified `frequency_hz` |
-| `radio_operating_state_read` | `IF;` | Parsed fixed fields including observational TX/RX |
-| `radio_mode_read` | `MD;` | Typed documented mode |
-| `radio_tx_state_read` | `TQ;` | Observational receive or transmit/pseudo-transmit |
+| `radio_session_normalize` | `AI0;`/`AI;`, `K20;`/`K2;`, `K30;`/`K3;` | `{type, auto_information:"off", k2_mode:"off", k3_extended_mode:"off"}` |
+| `radio_identify` | `OM;` | `{type, profile, product_code, option_flags}` |
+| `radio_firmware_read` | `RVM;`, optional `RVD;` | `{type, main, dsp}` |
+| `radio_vfo_a_read` | `FA;` | `{type, frequency_hz}` |
+| `radio_vfo_a_set` | validated `FAxxxxxxxxxxx;`, then `FA;` | `{type, frequency_hz, query_verified:true}` |
+| `radio_operating_state_read` | `IF;` | `{type, frequency_hz, tx_state}` |
+| `radio_mode_read` | `MD;` | `{type, mode}` |
+| `radio_tx_state_read` | `TQ;` | `{type, tx_state}` |
 
 `radio_profile_select` selects only `kx2` or `kx3`, releases and mutes first,
 invalidates the session, and requires new negotiation after profile validation.
+
+The normative, machine-readable command and result schemas are
+[`schema/v0-radio.schema.json`](schema/v0-radio.schema.json). Every radio command and
+result has `additionalProperties: false`; there are no implicit, profile-specific, or
+platform-specific members. In summary:
+
+- all read and normalize commands are exactly `{type}`; `radio_vfo_a_set` additionally
+  carries non-negative integer `frequency_hz`, and `radio_profile_select` additionally
+  carries `profile: "kx2"|"kx3"`;
+- `profile` is `"kx2"` or `"kx3"` and `product_code` is integer `1` or `2`;
+  `option_flags` is a unique array drawn from `"a"`, `"p"`, `"f"`, `"t"`, `"b"`,
+  `"x"`, and `"i"`, corresponding to the documented `OM APF---TBXI0n` positions;
+- firmware `main` is an `NN.NN` string and `dsp` is either the same string shape or
+  JSON `null` when the optional query is unavailable;
+- `mode` is one of `"lsb"`, `"usb"`, `"cw"`, `"fm"`, `"am"`, `"data"`,
+  `"cw_reverse"`, or `"data_reverse"`;
+- observational `tx_state` is `"receive"` or
+  `"transmit_or_pseudo_transmit"`—never PTT authority;
+- the adapter validates the entire fixed-width `IF` response but exposes only its
+  allowlisted `frequency_hz` and observational `tx_state` fields in v0.0; and
+- the profile-select result is exactly `{type, profile, state:"validating",
+  session_invalidated:true}`. Profile validation is an adapter/service event, not CAT
+  exposed to the host, and a fresh session is mandatory afterward.
 
 Before any radio I/O, the implementation MUST:
 
@@ -480,7 +506,10 @@ The expired intent is closed; a fresh operator action and fresh acquire are requ
 idempotent at the logical operation layer. The safety service first requests output
 inactive and mutes TX audio, invalidates the lease, closes the intent epoch, then
 responds with current command/sense status. A missing response cannot keep authority
-alive.
+alive. Requesting release changes `ptt.commanded`; it MUST NOT fabricate a change to
+the independently sampled `ptt.ptt_out`. Until a later sense sample reports inactive,
+the device cannot claim that physical release succeeded. Sensed active after the
+release bound latches `output_stuck_active`.
 
 Expiry schedules inactive output before ordinary work, records `lease_expired`, and
 releases within 100 ms when controllable. Detected BLE, session, audio, profile,
@@ -497,6 +526,11 @@ At 60,000 ms from first assertion in one `intent_id`, the safety service:
 4. rejects acquire and renew; and
 5. starts the receive-safe interval only after command is inactive, sensed `PTT OUT`
    is inactive, inhibit and required health are safe, and host release intent arrived.
+
+Any unsafe route, device-audio, inhibit, sensed-output, profile, BLE-link, or protocol
+session interval resets the continuous-cap rearm timer to zero. Restoring the last
+unsafe input starts a new full 1,000 ms interval; elapsed safe time from before the
+interruption never counts.
 
 Continuous-cap recovery requires all of:
 
@@ -572,6 +606,7 @@ protocol_fault
 host_route_unhealthy
 device_audio_unhealthy
 profile_fault
+profile_change
 radio_control_fault
 inhibit_open
 output_failed_to_assert
@@ -632,6 +667,8 @@ like a BLE connection, is not PTT authority.
 
 - [`vectors/v0.json`](vectors/v0.json) contains machine-readable fragmentation and
   semantic scenarios.
+- [`schema/v0-radio.schema.json`](schema/v0-radio.schema.json) defines the exact typed
+  radio command and result objects.
 - [`conformance.py`](conformance.py) is a Python-standard-library harness with a
   virtual monotonic clock and no Apple or BLE framework dependency.
 
@@ -641,11 +678,13 @@ Run:
 python3 protocol/conformance.py protocol/vectors/v0.json
 ```
 
-The vectors cover negotiated fragment sizes, normal acquire/renew/release, exact and
-altered duplicates, stale/replayed/out-of-order/malformed/wrong-session operations,
-expiry, replacement/reconnect/boot identity, independent transport and audio health,
-inhibit, command/sense mismatches, raw and keying-capable CAT denial before radio I/O,
-radio faults, continuous-cap lockout, rearm, recovery, and first-cause preservation.
+The vectors cover hello/session negotiation and replacement, limit/version/capability
+denials, negotiated fragment sizes, normal acquire/renew/release, exact and altered
+duplicates, stale/replayed/out-of-order/malformed/wrong-session operations, expiry,
+replacement/reconnect/boot identity, independent transport and audio health, inhibit,
+command/sense mismatches including stuck output at release, exact typed radio results,
+profile selection, raw and keying-capable CAT denial before radio I/O, radio faults,
+continuous-cap lockout, interrupted rearm, recovery, and first-cause preservation.
 
 The harness is executable evidence that the contract can be consumed without Swift,
 Core Bluetooth, AVFAudio, or a fixed Apple MTU. It is not production firmware and does

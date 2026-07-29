@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rigtether.dev/schema/v0-radio.schema.json",
+  "title": "RigTether v0 typed radio command and result objects",
+  "oneOf": [
+    {"$ref": "#/$defs/command"},
+    {"$ref": "#/$defs/result"}
+  ],
+  "$defs": {
+    "profile": {
+      "enum": ["kx2", "kx3"]
+    },
+    "mode": {
+      "enum": [
+        "lsb",
+        "usb",
+        "cw",
+        "fm",
+        "am",
+        "data",
+        "cw_reverse",
+        "data_reverse"
+      ]
+    },
+    "noArgumentCommand": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "radio_session_normalize",
+            "radio_identify",
+            "radio_firmware_read",
+            "radio_vfo_a_read",
+            "radio_operating_state_read",
+            "radio_mode_read",
+            "radio_tx_state_read"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "command": {
+      "oneOf": [
+        {"$ref": "#/$defs/noArgumentCommand"},
+        {
+          "type": "object",
+          "required": ["type", "frequency_hz"],
+          "properties": {
+            "type": {"const": "radio_vfo_a_set"},
+            "frequency_hz": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99999999999
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "profile"],
+          "properties": {
+            "type": {"const": "radio_profile_select"},
+            "profile": {"$ref": "#/$defs/profile"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "normalizeResult": {
+      "type": "object",
+      "required": [
+        "type",
+        "auto_information",
+        "k2_mode",
+        "k3_extended_mode"
+      ],
+      "properties": {
+        "type": {"const": "radio_session_normalize"},
+        "auto_information": {"const": "off"},
+        "k2_mode": {"const": "off"},
+        "k3_extended_mode": {"const": "off"}
+      },
+      "additionalProperties": false
+    },
+    "identifyResult": {
+      "type": "object",
+      "required": ["type", "profile", "product_code", "option_flags"],
+      "properties": {
+        "type": {"const": "radio_identify"},
+        "profile": {"$ref": "#/$defs/profile"},
+        "product_code": {
+          "type": "integer",
+          "enum": [1, 2]
+        },
+        "option_flags": {
+          "type": "array",
+          "items": {"enum": ["a", "p", "f", "t", "b", "x", "i"]},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "firmwareResult": {
+      "type": "object",
+      "required": ["type", "main", "dsp"],
+      "properties": {
+        "type": {"const": "radio_firmware_read"},
+        "main": {
+          "type": "string",
+          "pattern": "^[0-9]{2}\\.[0-9]{2}$"
+        },
+        "dsp": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{2}\\.[0-9]{2}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "vfoReadResult": {
+      "type": "object",
+      "required": ["type", "frequency_hz"],
+      "properties": {
+        "type": {"const": "radio_vfo_a_read"},
+        "frequency_hz": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99999999999
+        }
+      },
+      "additionalProperties": false
+    },
+    "vfoSetResult": {
+      "type": "object",
+      "required": ["type", "frequency_hz", "query_verified"],
+      "properties": {
+        "type": {"const": "radio_vfo_a_set"},
+        "frequency_hz": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99999999999
+        },
+        "query_verified": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "operatingStateResult": {
+      "type": "object",
+      "required": [
+        "type",
+        "frequency_hz",
+        "tx_state"
+      ],
+      "properties": {
+        "type": {"const": "radio_operating_state_read"},
+        "frequency_hz": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99999999999
+        },
+        "tx_state": {"enum": ["receive", "transmit_or_pseudo_transmit"]}
+      },
+      "additionalProperties": false
+    },
+    "modeResult": {
+      "type": "object",
+      "required": ["type", "mode"],
+      "properties": {
+        "type": {"const": "radio_mode_read"},
+        "mode": {"$ref": "#/$defs/mode"}
+      },
+      "additionalProperties": false
+    },
+    "txStateResult": {
+      "type": "object",
+      "required": ["type", "tx_state"],
+      "properties": {
+        "type": {"const": "radio_tx_state_read"},
+        "tx_state": {"enum": ["receive", "transmit_or_pseudo_transmit"]}
+      },
+      "additionalProperties": false
+    },
+    "profileSelectResult": {
+      "type": "object",
+      "required": ["type", "profile", "state", "session_invalidated"],
+      "properties": {
+        "type": {"const": "radio_profile_select"},
+        "profile": {"$ref": "#/$defs/profile"},
+        "state": {"const": "validating"},
+        "session_invalidated": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "result": {
+      "oneOf": [
+        {"$ref": "#/$defs/normalizeResult"},
+        {"$ref": "#/$defs/identifyResult"},
+        {"$ref": "#/$defs/firmwareResult"},
+        {"$ref": "#/$defs/vfoReadResult"},
+        {"$ref": "#/$defs/vfoSetResult"},
+        {"$ref": "#/$defs/operatingStateResult"},
+        {"$ref": "#/$defs/modeResult"},
+        {"$ref": "#/$defs/txStateResult"},
+        {"$ref": "#/$defs/profileSelectResult"}
+      ]
+    }
+  }
+}
