@@ -7,12 +7,14 @@ issues own executable work.
 
 Establish a source-backed product baseline:
 
-- iPhone control transport and distribution constraints;
-- cross-host constraints that preserve a future Android implementation;
-- KX2/KX3 audio, CAT, and PTT requirements;
-- transmit-safety invariants;
-- feasibility architecture and component boundaries; and
-- versioned v0 control protocol.
+- iPhone control transport and distribution constraints — accepted in ADR 0003;
+- cross-host constraints that preserve a future Android implementation — allocated to
+  platform adapters and host-neutral contracts in ADR 0005;
+- KX2/KX3 audio, CAT, and PTT requirements — source-backed with physical unknowns
+  reserved for M1 measurement;
+- transmit-safety invariants — accepted in ADR 0004;
+- feasibility architecture and component boundaries — accepted in ADR 0005; and
+- versioned v0 control protocol — the remaining technical M0 contract.
 
 Exit requires explicit owner approval of the baseline and authorization to build the
 bench proof.
@@ -23,7 +25,15 @@ Demonstrate useful audio, CAT, and fail-safe PTT from an iPhone through developm
 hardware to a KX2 on a dummy load, then validate the same contract with a KX3.
 
 The proof should be intentionally ugly, instrumentable, and replaceable. It is not a
-production PCB.
+production PCB. Work proceeds through independent but observable USB Audio, BLE
+control, audio conversion, radio-profile/CAT, and PTT-safety boundaries. Simulators,
+transcript fixtures, loopback, and a radio-disconnected PTT fixture precede
+human-supervised KX2/KX3 measurements.
+
+M1 chooses development hardware and exact USB descriptors and PCM formats. Those
+choices should stay inside Android's documented USB Audio Class 1 host-mode subset
+when compatible with the iPhone proof. Any exception needs contradictory evidence, an
+explicit owner decision, and a credible Android alternate path.
 
 ## Later — M2: Rev A open-hardware reference design
 

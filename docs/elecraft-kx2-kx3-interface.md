@@ -135,10 +135,11 @@ limit from the 0.1 W rating or the schematic's 10.0 ohm components.
   sink microphone bias until the measured bias network and the chosen coupling
   topology show that to be safe.
 - `MIC BIAS OFF` is the conservative configuration candidate for an actively driven,
-  AC-coupled RigTether source, but it is not yet a final setting. Issue #5 must
-  allocate a configurable radio-profile boundary for bias and coupling without
-  selecting a value. Issue #13 selects and records the bench setting and topology
-  from measurement evidence.
+  AC-coupled RigTether source, but it is not yet a final setting.
+  [ADR 0005](decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md)
+  allocates a configurable radio-profile boundary for bias and coupling without
+  selecting a value. Issue #13 selects and records the bench setting and topology from
+  measurement evidence.
 - Shield ground and logic ground remain distinct harness requirements. A schematic net
   relationship does not authorize combining them in the interface, cable, or PCB
   before continuity, powered differential-voltage, and ground-current tests.
@@ -196,8 +197,9 @@ For KX3, only `ACC2 IO LO=PTT` is compatible with the baseline normally open sin
 radio-specific second layer but cannot replace RigTether's independent physical
 series inhibit.
 
-Issue #5 must allocate a single selectable hardware-PTT boundary for each radio
-profile without choosing an unmeasured path. Issue #13 compares KX3 `MIC` ring 1 with
+[ADR 0005](decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md)
+allocates a single selectable hardware-PTT boundary for each radio profile without
+choosing an unmeasured path. Issue #13 compares KX3 `MIC` ring 1 with
 `ACC2 IO LO=PTT`, characterizes the KX2 mic-PTT circuit, and records the final bench
 choice from measurement evidence. This is an explicit decision boundary: choosing a
 path changes the harness and fault analysis. Exactly one path may be populated or
@@ -320,9 +322,10 @@ Treat these as separate interface requirements until measurements justify a bond
 Published schematics are evidence of the documented unit revision, not proof of the
 actual harness, contact resistance, powered common-mode voltage, or acceptable loop
 current. The radio adapter must preserve independent access and test points until the
-continuity and powered measurements below are complete. Issue #5 must allocate
-ownership and evidence gates for intentional bonds; issue #13 records each actual
-bench bond and its measured fault/loading consequence.
+continuity and powered measurements below are complete.
+[ADR 0005](decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md)
+allocates ownership and evidence gates for intentional bonds; issue #13 records each
+actual bench bond and its measured fault/loading consequence.
 
 ## Connector-insertion and miswiring hazards
 
@@ -512,8 +515,9 @@ from typical values, another radio model, cable observations, or schematic infer
 
 ## Downstream contract
 
-- Issue #5 must allocate the adapter, harness, profile, measurement, and safety
-  boundaries without filling any unknown with a typical value. It must preserve
+- [ADR 0005](decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md)
+  allocates the adapter, harness, profile, measurement, and safety boundaries without
+  filling any unknown with a typical value. It preserves
   separate KX2/KX3 profiles, exactly one selectable hardware PTT path, Key Out
   isolation, and ADR 0004; component and bench-circuit choices that depend on physical
   values remain gated on issue #13 evidence.

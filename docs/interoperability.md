@@ -44,6 +44,10 @@ defines the M1 radio-side contract and the measurements that still require a hum
   termination, and wireless interference close to the USB-C cable.
 - A connected audio route is not proof of a healthy control link. A connected BLE link
   is not proof that audio is routed correctly.
+- [ADR 0005](decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md)
+  assigns AVFAudio and Core Bluetooth behavior to the iOS adapter, keeps protocol and
+  safety semantics host-neutral, and gives USB media and BLE control separate owners,
+  health signals, logs, and fault-injection strategies.
 
 Older Lightning iPhones, iPads, and wired-control fallbacks are future compatibility
 work, not M1 support claims.

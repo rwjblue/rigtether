@@ -114,7 +114,8 @@ reconnect or power cycle does not count as that operator action.
 | CAT and audio cannot bypass PTT | Keep paths electrically distinct until measurement justifies combining them | Reject CAT transmit operations; audio samples never assert PTT; audio fault releases lease | Do not synthesize PTT from audio and do not expose unsafe raw CAT commands |
 | Fault containment | Current limiting, protection, test points, and physical disconnect remain required | Any detected safety fault releases, mutes, records reason, and locks out | Surface the fault; never retry transmit automatically |
 
-The firmware watchdog must be driven by the safety service only after it has checked
+Per [ADR 0005], the firmware watchdog must be driven by the dedicated, high-priority
+safety service only after it has checked
 the lease deadline, inhibit input, output feedback, control session, profile state, and
 required audio health. A timer interrupt that only proves the MCU is clocking is not a
 sufficient heartbeat.
@@ -155,7 +156,7 @@ manual documents mic-jack PTT but no equivalent general-purpose inhibit in the c
 material. The [KX2/KX3 interface specification] fixes the documented connector and
 configuration contract while leaving unpublished electrical values for human
 measurement. KX3 `ACC2 IO LO=PTT` is compatible with the normally open sink baseline;
-`HI=PTT` is not. Issue #5 must allocate exactly one selectable PTT path per profile
+`HI=PTT` is not. [ADR 0005] allocates exactly one selectable PTT path per profile
 without inventing missing electrical values; the measured bench choice follows in
 issue #13. Neither may use the native inhibit as a substitute for the independent
 series inhibit.
@@ -179,7 +180,7 @@ means the last renewal accepted by firmware, not sent by the host.
 | Firmware-update request, bootloader entry, or failed update | Reject update while output is sensed active; otherwise enter update with inhibit active and PTT passively inactive | Hardware bias; bootloader and firmware | Bootloader and rollback behavior need implementation evidence |
 | CAT timeout, parse error, or unexpected response | Release and lock out because radio configuration/state is uncertain; PTT release cannot wait for CAT | Firmware PTT path independent of CAT | Radio may remain in TX if keyed independently of RigTether |
 | Unsafe raw CAT transmit command | Reject before radio I/O; no lease or output change | Protocol and radio-profile allowlist | Programmer-reference command inventory must be maintained |
-| Audio samples, silence, clipping, underrun, or stream start | Never assert PTT; a declared transmit-audio health fault releases an active lease | Hardware/firmware separation | Threshold for `audio healthy` belongs to #5/#10 |
+| Audio samples, silence, clipping, underrun, or stream start | Never assert PTT; a declared transmit-audio health fault releases an active lease | Hardware/firmware separation and [ADR 0005] ownership | Hardware-dependent `audio healthy` thresholds belong to #10 |
 | Controllable output commanded active but sensed inactive | Release command, mute, latch fault, and report mismatch; do not retry | Output sensing and firmware | Could be open harness, inhibit, failed switch, or sensor; diagnosis needs bench evidence |
 | Controllable output commanded inactive but sensed active | Reassert inactive, mute, latch fault, report urgently; operator opens physical inhibit | Output sensing; physical inhibit | A shorted PTT device or conductor can sustain transmit until physically interrupted |
 | Output sensor stuck or misleading | Sensor must not create authority; cross-check at test point during validation | Hardware independence; tests | A false inactive reading can hide a stuck output; single-fault diagnostic coverage is not yet proven |
@@ -239,8 +240,10 @@ Sources were accessed 2026-07-29.
   published limits, required settings, CAT allowlist, hazards, and measurement plans.
   Bias, impedance, thresholds, ground relationships, and insertion behavior not
   published by Elecraft remain explicitly unmeasured and human-required.
-- Issues #5 and #10 must define control/audio health signals and the timing path from
-  detected fault to the safety service.
+- [ADR 0005] assigns independent control, host-route, device-media, CAT/profile,
+  inhibit, and output health to explicit owners. Issue #10 must select the
+  hardware-dependent audio-health thresholds and prove the timing path from detected
+  fault to the safety service.
 - Issue #6 must define encoding, identifier widths, session establishment,
   acknowledgement, errors, status fields, and conformance vectors without weakening
   these semantics.
@@ -267,4 +270,5 @@ This document is an engineering policy and feasibility decision, not a safety
 certification, regulatory conclusion, or replacement for the radio operating manual.
 
 [ADR 0004]: decisions/0004-bound-transmit-authority-with-device-enforced-leases.md
+[ADR 0005]: decisions/0005-separate-host-media-control-radio-and-safety-boundaries.md
 [KX2/KX3 interface specification]: elecraft-kx2-kx3-interface.md
