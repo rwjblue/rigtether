@@ -3,3 +3,6 @@
 set -euo pipefail
 python3 tools/check_repo.py
 python3 protocol/conformance.py protocol/vectors/v0.json
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace

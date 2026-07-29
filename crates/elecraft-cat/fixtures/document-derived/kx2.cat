@@ -1,0 +1,18 @@
+# provenance=document-derived
+# profile=kx2
+# source=https://ftp.elecraft.com/KX2/Manuals%20Downloads/K3S%26K3%26KX3%26KX2%20Pgmrs%20Ref%2C%20G5.pdf
+0|AI0;|
+5|AI;|AI0;
+0|K20;|
+5|K2;|K20;
+0|K30;|
+5|K3;|K30;
+5|OM;|OM ----------01;
+5|RVM;|RVM02.37;
+100|RVD;|RVD02.37;
+5|FA;|FA00007100000;
+500|FA00014060001;|
+5|FA;|FA00014060000;
+5|IF;|IF00014060000     +000000 0002000001 ;
+5|MD;|MD2;
+5|TQ;|TQ0;
