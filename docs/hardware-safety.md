@@ -152,8 +152,13 @@ be evaluated later; neither is implied by `PTT OUT`.
 The KX3 documents an ACC2 GPIO mode that can inhibit transmit. It is a possible
 radio-specific second layer, not the cross-radio RigTether inhibit baseline. The KX2
 manual documents mic-jack PTT but no equivalent general-purpose inhibit in the cited
-material. Issue #3 must settle connector and electrical requirements before either
-radio-specific facility is used.
+material. The [KX2/KX3 interface specification] fixes the documented connector and
+configuration contract while leaving unpublished electrical values for human
+measurement. KX3 `ACC2 IO LO=PTT` is compatible with the normally open sink baseline;
+`HI=PTT` is not. Issue #5 must allocate exactly one selectable PTT path per profile
+without inventing missing electrical values; the measured bench choice follows in
+issue #13. Neither may use the native inhibit as a substitute for the independent
+series inhibit.
 
 ## Hazard and failure-mode analysis
 
@@ -186,8 +191,9 @@ means the last renewal accepted by firmware, not sent by the host.
 ## Objectively testable acceptance checks
 
 The M1 fixture must represent the documented radio PTT input without an antenna or RF
-generation. Issue #3 supplies source-backed electrical limits; until then, use no
-assumed voltage, current, impedance, or ground relationship.
+generation. The [KX2/KX3 interface specification] supplies the published limits and
+explicitly labels all unpublished voltage, current, impedance, ground, and timing
+values as measurement-required. Do not substitute typical values for those unknowns.
 
 | Check | Stimulus | Pass criterion |
 | --- | --- | --- |
@@ -219,7 +225,8 @@ Sources were accessed 2026-07-29.
 | Classification | Material fact or conclusion | Source |
 | --- | --- | --- |
 | Documented fact | The KX2 mic connector includes a PTT contact; Elecraft says an always-on TX LED can indicate external equipment holding PTT. | [Elecraft KX2 Owner's Manual, Rev B2](https://ftp.elecraft.com/KX2/Manuals%20Downloads/KX2%20owner%27s%20man%20B2.pdf) |
-| Documented fact | The KX3 mic connector includes PTT; its ACC2 GPIO can be configured as PTT or transmit inhibit; its TX LED indicates transmit. | [Elecraft KX3 Owner's Manual, Rev C5](https://ftp.elecraft.com/KX3/Manuals%20Downloads/E740163%20KX3%20Owner%27s%20man%20Rev%20C5.pdf), [current manuals and errata index](https://elecraft.com/pages/manuals-downloads) |
+| Documented fact | KX2 mic PTT is ground-active. KX3 mic PTT is ground-active, while KX3 ACC2 GPIO documents low-active PTT and optional low/high-active inhibit modes. | [KX2/KX3 interface specification](elecraft-kx2-kx3-interface.md) and its revisioned Elecraft sources |
+| Documented fact | KX3 can be remotely powered by 8 to 12 V on its mic-PTT conductor for at least 100 ms; RigTether must never source that conductor. | [Elecraft KX3 Owner's Manual, Rev C5](https://ftp.elecraft.com/KX3/Manuals%20Downloads/E740163%20KX3%20Owner%27s%20man%20Rev%20C5.pdf) |
 | Documented fact | iOS normally suspends background apps; Core Bluetooth background modes provide event-oriented execution but do not run forever, and restoration does not apply in every user/device state. | [Apple background execution modes](https://developer.apple.com/documentation/xcode/configuring-background-execution-modes), [Core Bluetooth background processing](https://developer.apple.com/library/archive/documentation/NetworkingInternetWeb/Conceptual/CoreBluetooth_concepts/CoreBluetoothBackgroundProcessingForIOSApps/PerformingTasksWhileYourAppIsInTheBackground.html), [TN3115 Bluetooth restoration rules](https://developer.apple.com/documentation/technotes/tn3115-bluetooth-state-restoration-app-relaunch-rules) |
 | Documented fact | Bluetooth LE connection supervision detects link loss, but its timeout is negotiated over a broad range rather than being a RigTether application deadline. | [Bluetooth Core 6.2, Link Layer §4.5.2](https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-62/out/en/low-energy-controller/link-layer-specification.html#UUID-702f1490-4894-c9bc-422b-05e67e88f7e4) |
 | Engineering inference | A device-owned short lease is required because neither app lifecycle callbacks nor BLE disconnect detection gives the required release bound. | Derived from the cited Apple and Bluetooth behavior; verified only when the M1 timing checks pass |
@@ -228,8 +235,10 @@ Sources were accessed 2026-07-29.
 
 ## Unknowns and required follow-up
 
-- Issue #3 must establish the KX2/KX3 PTT pins, active levels, electrical limits,
-  microphone bias interaction, grounds, configuration, and any safe native inhibit.
+- The [KX2/KX3 interface specification] establishes documented pins, active levels,
+  published limits, required settings, CAT allowlist, hazards, and measurement plans.
+  Bias, impedance, thresholds, ground relationships, and insertion behavior not
+  published by Elecraft remain explicitly unmeasured and human-required.
 - Issues #5 and #10 must define control/audio health signals and the timing path from
   detected fault to the safety service.
 - Issue #6 must define encoding, identifier widths, session establishment,
@@ -258,3 +267,4 @@ This document is an engineering policy and feasibility decision, not a safety
 certification, regulatory conclusion, or replacement for the radio operating manual.
 
 [ADR 0004]: decisions/0004-bound-transmit-authority-with-device-enforced-leases.md
+[KX2/KX3 interface specification]: elecraft-kx2-kx3-interface.md

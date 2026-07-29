@@ -11,6 +11,26 @@ The first proof targets a currently supported iOS release on a USB-C iPhone. Exa
 iPhone model, iOS build, USB cable, audio descriptors and formats, BLE parameters, CAT
 rates, and radio firmware versions must be recorded with M1 evidence.
 
+## Radio-profile baseline
+
+The source-backed [KX2/KX3 radio interface specification](elecraft-kx2-kx3-interface.md)
+defines the M1 radio-side contract and the measurements that still require a human:
+
+- KX2 and KX3 have separate profiles even where Elecraft documents similar connectors
+  or CAT commands.
+- Receive audio comes from `PHONES`; transmit audio comes through `MIC`. Their actual
+  voltage, impedance, bias, common-mode, and clipping behavior must be measured before
+  the adapter circuit is selected.
+- CAT uses KX2 `ACC` or KX3 `ACC1` at a 4,800 bit/s baseline. The M1 adapter exposes a
+  typed read/frequency-set allowlist, not raw CAT, and cannot emit a transmit command.
+- Hardware PTT is the only RigTether-controlled keying path. KX2 uses a measured
+  mic-PTT implementation; KX3 requires an explicit choice between measured mic PTT and
+  `ACC2 IO LO=PTT`. Exactly one path is enabled per profile.
+- KX3's native inhibit is optional defense in depth, not a replacement for the
+  independent physical TX inhibit and sensed `PTT OUT` required by ADR 0004.
+- Real-radio electrical and insertion evidence belongs to issue #13 and remains
+  `human-required`. No KX2/KX3 physical result is claimed by the source study.
+
 ## Host transport baseline
 
 - Bidirectional media uses a class-compliant USB Audio function surfaced as the iOS
@@ -67,3 +87,7 @@ A support claim requires:
 - PTT mechanism;
 - fault tests performed; and
 - known limitations.
+
+For KX2/KX3, the evidence must also include every radio-side value and powered
+insertion behavior identified as measurement-required by the radio interface
+specification.
