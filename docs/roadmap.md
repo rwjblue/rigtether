@@ -3,9 +3,9 @@
 The roadmap describes product outcomes, not a task list. GitHub milestones and focused
 issues own executable work.
 
-## Current — M0: feasibility and architecture
+## Completed — M0: feasibility and architecture
 
-Establish a source-backed product baseline:
+The owner approved the source-backed baseline in issue #7 on 2026-07-29:
 
 - iPhone control transport and distribution constraints — accepted in ADR 0003;
 - cross-host constraints that preserve a future Android implementation — allocated to
@@ -14,12 +14,13 @@ Establish a source-backed product baseline:
   reserved for M1 measurement;
 - transmit-safety invariants — accepted in ADR 0004;
 - feasibility architecture and component boundaries — accepted in ADR 0005; and
-- versioned v0 control protocol — the remaining technical M0 contract.
+- versioned v0 control protocol — accepted in ADR 0006 with executable conformance
+  vectors.
 
-Exit requires explicit owner approval of the baseline and authorization to build the
-bench proof.
+That approval authorizes the M1 bench proof without claiming physical, electrical, RF,
+current-device, or KX2/KX3 validation.
 
-## Next — M1: end-to-end bench proof
+## Current — M1: end-to-end bench proof
 
 Demonstrate useful audio, CAT, and fail-safe PTT from an iPhone through development
 hardware to a KX2 on a dummy load, then validate the same contract with a KX3.

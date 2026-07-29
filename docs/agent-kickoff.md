@@ -1,14 +1,15 @@
 # Agent kickoff
 
 Use an explicit issue handoff. Do not ask an agent to "start building RigTether"; the
-project still contains unresolved architecture and safety choices.
+owner-approved M1 work remains decomposed into dependency-ordered, bounded contracts.
 
 ## Recommended first handoff
 
 Choose an open issue carrying `agent-ready` and confirm its dependencies are closed.
-The iPhone transport decision has landed; do not reopen it without new contradictory
-evidence. The GitHub queue reflects which remaining M0 decision or implementation work
-is actually ready.
+The M0 baseline has landed and was approved in issue #7; do not reopen it without new
+contradictory evidence. The first independent M1 handoffs are issue #9, the typed
+Elecraft CAT core and fixtures, and issue #10, the bench-prototype platform decision.
+The GitHub queue remains authoritative for current readiness.
 
 Example prompt:
 
@@ -26,9 +27,10 @@ issues it unblocks.
 
 ## Parallel work
 
-The transport, Elecraft interface, and safety issues are independent enough for separate
-agents. Do not hand off architecture or protocol issues until all of their listed
-dependencies have landed.
+The CAT core in #9 and platform decision in #10 may proceed independently. Do not hand
+off firmware, the iOS probe, transport characterization, bench hardware, or integration
+until every listed dependency has landed. A readiness label is not authorization;
+each issue still needs an explicit handoff.
 
 ## Human boundaries
 
