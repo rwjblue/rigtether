@@ -135,9 +135,10 @@ limit from the 0.1 W rating or the schematic's 10.0 ohm components.
   sink microphone bias until the measured bias network and the chosen coupling
   topology show that to be safe.
 - `MIC BIAS OFF` is the conservative configuration candidate for an actively driven,
-  AC-coupled RigTether source, but it is not yet a final setting. Issue #5 must select
-  the coupling and setting from measurements and must retain support for the
-  radio-specific profile.
+  AC-coupled RigTether source, but it is not yet a final setting. Issue #5 must
+  allocate a configurable radio-profile boundary for bias and coupling without
+  selecting a value. Issue #13 selects and records the bench setting and topology
+  from measurement evidence.
 - Shield ground and logic ground remain distinct harness requirements. A schematic net
   relationship does not authorize combining them in the interface, cable, or PCB
   before continuity, powered differential-voltage, and ground-current tests.
@@ -149,8 +150,8 @@ limit from the 0.1 W rating or the schematic's 10.0 ohm components.
 For each radio and for both `MIC BIAS OFF` and `ON`, measure bias voltage, effective
 source resistance, input impedance over the intended voice band, DC common mode,
 low-level gain, signal amplitude at the intended ALC indication, clipping onset, and
-interaction with PTT/button decoding. A physical result is required before issue #5
-may choose codec range, attenuator, coupling capacitor, or final menu settings.
+interaction with PTT/button decoding. A physical result is required before issue #13
+may fix the bench codec range, attenuator, coupling capacitor, or final menu settings.
 
 ## Hardware PTT
 
@@ -195,12 +196,14 @@ For KX3, only `ACC2 IO LO=PTT` is compatible with the baseline normally open sin
 radio-specific second layer but cannot replace RigTether's independent physical
 series inhibit.
 
-The final KX3 choice between `MIC` ring 1 and `ACC2 IO LO=PTT`, and the final KX2
-mic-PTT circuit, belong to issue #5 after measurement. This is an explicit decision
-boundary: choosing a path changes the harness and fault analysis. Exactly one path may
-be populated or enabled for a profile. Any proposal to drive both, use active-high
-PTT, omit sensed `PTT OUT`, or replace the physical inhibit requires an owner decision
-and a superseding safety ADR.
+Issue #5 must allocate a single selectable hardware-PTT boundary for each radio
+profile without choosing an unmeasured path. Issue #13 compares KX3 `MIC` ring 1 with
+`ACC2 IO LO=PTT`, characterizes the KX2 mic-PTT circuit, and records the final bench
+choice from measurement evidence. This is an explicit decision boundary: choosing a
+path changes the harness and fault analysis. Exactly one path may be populated or
+enabled for a profile. Any proposal to drive both, use active-high PTT, omit sensed
+`PTT OUT`, or replace the physical inhibit requires an owner decision and a
+superseding safety ADR.
 
 RigTether must never source voltage onto KX3 `MIC` PTT. The 8 to 12 V remote-power-on
 behavior makes source leakage, charged coupling components, miswiring, and insertion
@@ -213,7 +216,7 @@ thresholds, hysteresis, sink current, debounce, maximum permitted sink resistanc
 timing, or behavior throughout boot and brownout. KX3 documents the nominal
 `ACC2 IO LO=PTT` level but still requires measurement of open voltage, sink current,
 threshold, timing, and firmware/menu interaction. Measure the selected path on each
-radio and compare KX3 candidates before issue #5 fixes the profile.
+radio and compare KX3 candidates before issue #13 fixes the bench profile.
 
 ## CAT electrical interface and configuration
 
@@ -317,8 +320,9 @@ Treat these as separate interface requirements until measurements justify a bond
 Published schematics are evidence of the documented unit revision, not proof of the
 actual harness, contact resistance, powered common-mode voltage, or acceptable loop
 current. The radio adapter must preserve independent access and test points until the
-continuity and powered measurements below are complete. Issue #5 must state every
-intentional bond and its fault/loading consequence.
+continuity and powered measurements below are complete. Issue #5 must allocate
+ownership and evidence gates for intentional bonds; issue #13 records each actual
+bench bond and its measured fault/loading consequence.
 
 ## Connector-insertion and miswiring hazards
 
