@@ -63,6 +63,10 @@ REQUIRED_COVERAGE = {
     "rearm_continuity",
     "profile_selection",
     "typed_radio_schema",
+    "faulted_session_rearm",
+    "session_exhaustion",
+    "radio_identity_correlation",
+    "radio_argument_validation",
 }
 
 REQUIRED_CAPABILITIES = {
@@ -291,6 +295,7 @@ class Model:
     start_op_id: str | None = None
     start_bytes: bytes | None = None
     start_response: dict[str, Any] | None = None
+    injected_identity_product_code: int | None = None
 
     @classmethod
     def from_initial(cls, initial: dict[str, Any], ids: dict[str, str]) -> "Model":
@@ -330,7 +335,7 @@ class Model:
             and self.device_audio == "healthy"
             and self.profile == "ready"
             and self.ble_link == "connected"
-            and self.protocol_session in {"active", "faulted"}
+            and self.protocol_session == "active"
         )
 
     def refresh_rearm(self) -> None:
@@ -643,6 +648,7 @@ class Model:
                 or self.device_audio != "healthy"
                 or self.profile != "ready"
                 or self.ble_link != "connected"
+                or self.protocol_session != "active"
             ):
                 return self.error("rearm_incomplete")
             if self.first_fault_code == "continuous_cap":
@@ -686,18 +692,41 @@ class Model:
                     "session_invalidated": True,
                 }
             )
+        if command_type == "radio_identify":
+            if set(command) != {"type"}:
+                return self.error("invalid_argument")
+            expected_code = 1 if self.radio_profile == "kx2" else 2
+            observed_code = (
+                expected_code
+                if self.injected_identity_product_code is None
+                else self.injected_identity_product_code
+            )
+            self.injected_identity_product_code = None
+            self.radio_io_count += 1
+            if observed_code != expected_code:
+                self.profile = "faulted"
+                was_transmitting = self.safety_state == "tx_active"
+                if was_transmitting:
+                    self.lockout("radio_control_fault")
+                return self.error(
+                    "radio_control_fault",
+                    "lockout" if was_transmitting else "none",
+                    radio_io=True,
+                )
+            return self.ok(
+                {
+                    "type": command_type,
+                    "profile": self.radio_profile,
+                    "product_code": observed_code,
+                    "option_flags": ["a", "p", "f", "t", "b", "x", "i"],
+                }
+            )
         radio_results: dict[str, dict[str, Any]] = {
             "radio_session_normalize": {
                 "type": "radio_session_normalize",
                 "auto_information": "off",
                 "k2_mode": "off",
                 "k3_extended_mode": "off",
-            },
-            "radio_identify": {
-                "type": "radio_identify",
-                "profile": self.radio_profile,
-                "product_code": 1 if self.radio_profile == "kx2" else 2,
-                "option_flags": ["a", "p", "f", "t", "b", "x", "i"],
             },
             "radio_firmware_read": {
                 "type": "radio_firmware_read",
@@ -728,6 +757,7 @@ class Model:
                 set(command) != {"type", "frequency_hz"}
                 or isinstance(frequency, bool)
                 or not isinstance(frequency, int)
+                or frequency < 0
                 or frequency > 99_999_999_999
             ):
                 return self.error("invalid_argument")
@@ -800,6 +830,9 @@ class Model:
             self.lockout("protocol_fault", op_id=op_id)
             self.last_result = self.error("out_of_order", "lockout")
             return
+        if self.next_seq > MAX_SESSION_OPERATIONS:
+            self.last_result = self.error("session_exhausted")
+            return
         response = self.execute_command(command)
         if self.session_id is None:
             self.last_result = response
@@ -838,12 +871,29 @@ class Model:
                     "accepted_renewals": renewals,
                 },
             }
+        elif action == "fill_session":
+            while self.next_seq <= MAX_SESSION_OPERATIONS:
+                seq = self.next_seq
+                self.request(
+                    {
+                        "op_id": f"{0x5000 + seq:032x}",
+                        "seq": seq,
+                        "command": {"type": "status_read"},
+                    }
+                )
+                if not self.last_result or not self.last_result["ok"]:
+                    fail("fill_session operation failed")
         elif action == "request":
             self.request(event)
         elif action == "hello":
             self.hello()
         elif action == "session_start":
             self.session_start(event)
+        elif action == "inject_radio_identity":
+            product_code = event["product_code"]
+            if product_code not in {1, 2}:
+                fail("injected identity product code must be 1 or 2")
+            self.injected_identity_product_code = product_code
         elif action == "malformed":
             self.lockout("protocol_fault")
             self.last_result = self.error("malformed", "lockout")
@@ -984,6 +1034,7 @@ class Model:
             "last_release_code": self.last_release_code,
             "last_release_at_ms": self.last_release_at_ms,
             "rearm_started_ms": self.rearm_started_ms,
+            "cached_operations": len(self.cache),
             "radio_io_count": self.radio_io_count,
             "last_result": self.last_result,
         }
@@ -1099,6 +1150,27 @@ def load_vectors(path: Path) -> dict[str, Any]:
     return data
 
 
+def validate_radio_schema(path: Path) -> None:
+    try:
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        alternatives = schema["$defs"]["identifyResult"]["oneOf"]
+        profile_codes = {
+            (
+                item["properties"]["profile"]["const"],
+                item["properties"]["product_code"]["const"],
+            )
+            for item in alternatives
+        }
+        vfo_set = schema["$defs"]["command"]["oneOf"][1]
+        minimum_frequency = vfo_set["properties"]["frequency_hz"]["minimum"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        fail(f"invalid typed-radio schema: {exc}")
+    if profile_codes != {("kx2", 1), ("kx3", 2)}:
+        fail("typed-radio schema permits a contradictory profile/product code")
+    if minimum_frequency != 0:
+        fail("typed-radio schema must reject negative VFO frequencies")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("vectors", type=Path)
@@ -1106,6 +1178,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         vectors = load_vectors(args.vectors)
+        validate_radio_schema(args.vectors.parent / vectors["radio_schema"])
         coverage = set()
         for item in (
             vectors["framing"]

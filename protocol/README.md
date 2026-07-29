@@ -287,7 +287,9 @@ The rules are exact:
    the session ends. It MUST NOT evict entries or treat a digest collision as an exact
    duplicate. Both peers negotiate at least 512 operations per session. When the limit
    is exhausted, further new operations return `session_exhausted`; the host replaces
-   the session receive-safely.
+   the session receive-safely. Exhaustion is checked only for a fresh operation at
+   `next_seq`; an exact duplicate of any retained operation still returns its cached
+   response and does not consume another slot.
 4. A byte-exact request with the same `op_id` and `seq` returns the cached response
    bytes. It consumes no sequence, repeats no radio I/O or transition, and changes no
    lease deadline.
@@ -337,7 +339,11 @@ platform-specific members. In summary:
 - all read and normalize commands are exactly `{type}`; `radio_vfo_a_set` additionally
   carries non-negative integer `frequency_hz`, and `radio_profile_select` additionally
   carries `profile: "kx2"|"kx3"`;
-- `profile` is `"kx2"` or `"kx3"` and `product_code` is integer `1` or `2`;
+- `profile` is `"kx2"` or `"kx3"` and is inseparably correlated with
+  `product_code`: KX2 is exactly `1`, KX3 is exactly `2`, and any mismatch is
+  `radio_control_fault`; a mismatch marks the selected profile `faulted`, and recovery
+  requires explicit profile selection, successful adapter validation, a fresh
+  protocol session, and a fresh host-route report;
   `option_flags` is a unique array drawn from `"a"`, `"p"`, `"f"`, `"t"`, `"b"`,
   `"x"`, and `"i"`, corresponding to the documented `OM APF---TBXI0n` positions;
 - firmware `main` is an `NN.NN` string and `dsp` is either the same string shape or
@@ -530,7 +536,9 @@ At 60,000 ms from first assertion in one `intent_id`, the safety service:
 Any unsafe route, device-audio, inhibit, sensed-output, profile, BLE-link, or protocol
 session interval resets the continuous-cap rearm timer to zero. Restoring the last
 unsafe input starts a new full 1,000 ms interval; elapsed safe time from before the
-interruption never counts.
+interruption never counts. A `faulted` protocol session is unsafe: it must be replaced,
+and the replacement session must re-report host-route health, before rearm can start.
+`safety_recover` never changes a faulted session back to active.
 
 Continuous-cap recovery requires all of:
 
@@ -683,8 +691,11 @@ denials, negotiated fragment sizes, normal acquire/renew/release, exact and alte
 duplicates, stale/replayed/out-of-order/malformed/wrong-session operations, expiry,
 replacement/reconnect/boot identity, independent transport and audio health, inhibit,
 command/sense mismatches including stuck output at release, exact typed radio results,
-profile selection, raw and keying-capable CAT denial before radio I/O, radio faults,
-continuous-cap lockout, interrupted rearm, recovery, and first-cause preservation.
+successful and contradictory profile/product identity responses, strict-parser
+rejection of a negative frequency, command-level denial of a nonnegative out-of-schema
+frequency before radio I/O, session exhaustion, profile selection, raw and
+keying-capable CAT denial before radio I/O, radio faults, continuous-cap lockout,
+faulted-session and other interrupted rearm, recovery, and first-cause preservation.
 
 The harness is executable evidence that the contract can be consumed without Swift,
 Core Bluetooth, AVFAudio, or a fixed Apple MTU. It is not production firmware and does
