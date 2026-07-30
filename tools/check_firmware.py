@@ -264,6 +264,7 @@ for safety_health_boundary in (
     "inputs->host_route != RT_HEALTH_HEALTHY",
     "RT_RELEASE_HOST_ROUTE",
     "state.inputs.inhibit_known && state.inputs.inhibit_closed",
+    "!inputs->ptt_out_known || !inputs->ptt_out_active",
     "state.state = RT_TX_ACTIVE",
     "state.lease_deadline_ms = accepted_at_ms + requested_ms",
     "state.continuous_started_ms = accepted_at_ms",

@@ -255,8 +255,8 @@ void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 			  (!inputs->inhibit_known || !inputs->inhibit_closed);
 	release_profile = state.commanded_ptt &&
 			  inputs->radio_profile != RT_HEALTH_HEALTHY;
-	output_mismatch = state.commanded_ptt && inputs->ptt_out_known &&
-			  !inputs->ptt_out_active;
+	output_mismatch = state.commanded_ptt &&
+			  (!inputs->ptt_out_known || !inputs->ptt_out_active);
 	if (state.state == RT_TX_ACTIVE && inputs_allow_receive_safe()) {
 		state.state = RT_RECEIVE_SAFE;
 	}
