@@ -186,6 +186,26 @@ if not all(
 ):
     error("every session invalidation must clear cached session-start authority")
 
+replacement_start = protocol_source.find("rt_safety_session_replaced();")
+replacement_cache_reset = protocol_source.find(
+    "rt_operation_cache_reset();", replacement_start
+)
+if replacement_start < 0 or replacement_cache_reset < 0:
+    error("session replacement cache reset path is missing")
+else:
+    invalidation = protocol_source[replacement_start:replacement_cache_reset]
+    for boundary in (
+        "session_active = false;",
+        "session_identity[0] = '\\0';",
+        "cached_start_length = 0;",
+        "cached_start_response_length = 0;",
+    ):
+        if boundary not in invalidation:
+            error(
+                "session authority survives replacement cache failure: "
+                f"{boundary}"
+            )
+
 if "simulator_frequency_hz" in protocol_source:
     error("nRF radio-disconnected image must not manufacture simulated CAT success")
 if "object_keys[8][24]" in protocol_source:

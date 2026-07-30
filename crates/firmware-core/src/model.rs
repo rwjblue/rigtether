@@ -277,21 +277,12 @@ impl Model {
                 self.refresh_rearm();
             }
             "boot" => {
-                self.release("boot_or_update", true);
-                self.boot_id = object
+                let boot_id = object
                     .get("boot_id")
                     .and_then(Value::as_str)
                     .unwrap_or(&self.ids.boot2)
                     .to_owned();
-                self.session_id = None;
-                self.protocol_session = "none".to_owned();
-                self.next_seq = 1;
-                self.cache.clear();
-                self.seq_to_op.clear();
-                self.intent_id = None;
-                self.first_fault_code = None;
-                self.first_fault_id = None;
-                self.host_route = "unknown".to_owned();
+                self.reset_runtime("boot_or_update", boot_id);
             }
             "watchdog" => {
                 self.process_time(
@@ -299,11 +290,7 @@ impl Model {
                         .checked_add(500)
                         .ok_or("watchdog time overflow")?,
                 )?;
-                self.release("watchdog_reset", true);
-                self.boot_id = self.ids.boot2.clone();
-                self.session_id = None;
-                self.protocol_session = "none".to_owned();
-                self.host_route = "unknown".to_owned();
+                self.reset_runtime("watchdog_reset", self.ids.boot2.clone());
             }
             other => return Err(format!("unknown action {other}")),
         }
@@ -1327,6 +1314,43 @@ impl Model {
             self.safety_state = "receive_safe".to_owned();
         }
         self.refresh_rearm();
+    }
+
+    fn reset_runtime(&mut self, release_code: &str, boot_id: String) {
+        self.release(release_code, true);
+        self.boot_id = boot_id;
+        self.session_id = None;
+        self.protocol_session = "none".to_owned();
+        self.host_route = "unknown".to_owned();
+        self.safety_state = if self.ptt_out == "inactive" {
+            "receive_safe"
+        } else {
+            /* Command is inactive; await an independent inactive sense sample. */
+            "tx_active"
+        }
+        .to_owned();
+        self.next_seq = 1;
+        self.cache.clear();
+        self.seq_to_op.clear();
+        self.start_client_nonce = None;
+        self.start_op_id = None;
+        self.start_bytes = None;
+        self.start_response = None;
+        self.intent_id = None;
+        self.expired_lease_ids.clear();
+        self.first_fault_code = None;
+        self.first_fault_id = None;
+        self.first_fault_at_ms = None;
+        self.capped_intent_id = None;
+        self.cap_release_reported = false;
+        self.rearm_started_ms = None;
+        self.lease_counter = 0;
+        self.fault_counter = 0;
+        self.session_counter = 0;
+        self.status_seq = 0;
+        self.radio_io_count = 0;
+        self.last_result = None;
+        self.injected_identity_product_code = None;
     }
 
     fn disconnect(&mut self) {

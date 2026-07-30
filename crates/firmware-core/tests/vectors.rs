@@ -345,6 +345,45 @@ fn profile_selection_clears_cached_session_start() {
 }
 
 #[test]
+fn reset_clears_lockout_and_cached_session_start() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let start = br#"{"type":"session_start","boot_id":"11111111111111111111111111111111","client_nonce":"22222222222222222222222222222222","op_id":"33333333333333333333333333333333","select":{"major":0,"minor":0},"required_capabilities":["first_cause_fault_v0","independent_health_v0","ordered_operations","ptt_leases_v0","typed_radio_v0"],"client_rx_frame_limit":185,"client_max_message_bytes":4096}"#;
+    let malformed = br#"{"type":"request","v":{"major":1,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"00000000000000000000000000004501","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#;
+
+    for action in ["boot", "watchdog"] {
+        let mut model =
+            Model::from_initial(ids.clone(), Some(&serde_json::json!({"session": false})))
+                .expect("pre-session initial state");
+        let started = model
+            .handle_logical(start)
+            .expect("initial session negotiation");
+        assert_eq!(
+            started["result"]["session_id"],
+            "00000000000000000000000000004501"
+        );
+        let denial = model
+            .handle_logical(malformed)
+            .expect("protocol lockout response");
+        assert_eq!(denial["error"]["safety_effect"], "lockout");
+        assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+
+        model
+            .event(&serde_json::json!({"action": action}))
+            .expect("simulated reset");
+        assert_eq!(model.snapshot()["safety_state"], "receive_safe");
+        assert_eq!(model.snapshot()["first_fault_code"], Value::Null);
+        assert_eq!(model.snapshot()["first_fault_id"], Value::Null);
+
+        let stale = model
+            .handle_logical(start)
+            .expect("old start is evaluated against the new boot");
+        assert_eq!(stale["error"]["code"], "stale_boot");
+        assert_eq!(model.snapshot()["session_id"], Value::Null);
+    }
+}
+
+#[test]
 fn ptt_release_requires_lease_and_reason_fields() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");

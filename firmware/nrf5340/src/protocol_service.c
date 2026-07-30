@@ -884,13 +884,14 @@ static int handle_session_start(char *json, size_t json_length,
 	}
 
 	rt_safety_session_replaced();
-	uint8_t random_session[16];
-	int err = sys_csrand_get(random_session, sizeof(random_session));
-	if (err != 0) {
-		return err;
-	}
-	render_hex(session_identity, random_session);
-	err = rt_operation_cache_reset();
+	session_active = false;
+	session_identity[0] = '\0';
+	next_seq = 1;
+	cached_start_length = 0;
+	cached_start_response_length = 0;
+	cached_client_nonce[0] = '\0';
+	cached_start_op_id[0] = '\0';
+	int err = rt_operation_cache_reset();
 	if (err != 0) {
 		rt_safety_protocol_fault();
 		int length =
@@ -900,6 +901,18 @@ static int handle_session_start(char *json, size_t json_length,
 				   copy_response(rendered, response, response_capacity,
 						 response_length);
 	}
+	uint8_t random_session[16];
+	err = sys_csrand_get(random_session, sizeof(random_session));
+	if (err != 0) {
+		rt_safety_protocol_fault();
+		int length =
+			render_error("protocol_fault", "lockout", rendered,
+				     sizeof(rendered));
+		return length < 0 ? length :
+				   copy_response(rendered, response, response_capacity,
+						 response_length);
+	}
+	render_hex(session_identity, random_session);
 	session_active = true;
 	next_seq = 1;
 	rt_safety_protocol_session_active();
