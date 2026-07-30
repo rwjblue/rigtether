@@ -800,7 +800,7 @@ impl Model {
             | "radio_mode_read"
             | "radio_tx_state_read" => self.radio_read(command_type, command),
             "raw_cat" => error("unsupported_radio_operation", "none", false),
-            name if name.starts_with("radio_") || is_keying_capable(name) => {
+            name if name.starts_with("radio_") || is_prohibited_radio_operation(name) => {
                 error("unsupported_radio_operation", "none", false)
             }
             _ => error("unsupported_command", "none", false),
@@ -1184,6 +1184,7 @@ impl Model {
             return Ok(());
         }
         let accepted_at_ms = self.now_ms;
+        let response_next_seq = self.next_seq + 1;
         let response_body = self.execute_command(command.expect("validated"));
         if self.session_id.is_none() {
             self.last_result = Some(response_envelope(
@@ -1192,13 +1193,13 @@ impl Model {
                 op_id,
                 seq,
                 accepted_at_ms,
-                self.next_seq,
+                response_next_seq,
                 response_body,
             ));
             return Ok(());
         }
         self.seq_to_op.insert(seq, op_id.to_owned());
-        self.next_seq += 1;
+        self.next_seq = response_next_seq;
         let response = response_envelope(
             &request_boot_id,
             request_session_id.as_deref().expect("active session"),
@@ -1517,10 +1518,21 @@ fn is_hex_id(value: &str) -> bool {
             .all(|character| character.is_ascii_digit() || (b'a'..=b'f').contains(&character))
 }
 
-fn is_keying_capable(value: &str) -> bool {
+fn is_prohibited_radio_operation(value: &str) -> bool {
     matches!(
         value,
-        "TX" | "RX" | "SWT" | "SWH" | "KY" | "tune" | "xmit" | "keyer"
+        "TX" | "RX"
+            | "SWT"
+            | "SWH"
+            | "KY"
+            | "tune"
+            | "xmit"
+            | "keyer"
+            | "power_write"
+            | "VOX_write"
+            | "mode_write"
+            | "menu_write"
+            | "baud_write"
     )
 }
 

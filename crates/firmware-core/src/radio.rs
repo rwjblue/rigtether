@@ -95,7 +95,7 @@ impl<I: RadioIo> TypedRadio<I> {
                     .and_then(Value::as_str)
                     .unwrap_or("<malformed>"),
             ),
-            name if name.starts_with("radio_") || is_keying_capable(name) => {
+            name if name.starts_with("radio_") || is_prohibited_radio_operation(name) => {
                 Request::Unsupported(name)
             }
             _ => return invalid_argument(),
@@ -118,10 +118,21 @@ fn invalid_argument() -> RadioOutcome {
     }
 }
 
-fn is_keying_capable(name: &str) -> bool {
+fn is_prohibited_radio_operation(name: &str) -> bool {
     matches!(
         name,
-        "TX" | "RX" | "SWT" | "SWH" | "KY" | "tune" | "xmit" | "keyer"
+        "TX" | "RX"
+            | "SWT"
+            | "SWH"
+            | "KY"
+            | "tune"
+            | "xmit"
+            | "keyer"
+            | "power_write"
+            | "VOX_write"
+            | "mode_write"
+            | "menu_write"
+            | "baud_write"
     )
 }
 

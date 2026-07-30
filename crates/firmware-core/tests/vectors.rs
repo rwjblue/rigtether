@@ -332,6 +332,7 @@ fn profile_selection_clears_cached_session_start() {
         .handle_logical(select.as_bytes())
         .expect("profile selection response");
     assert_eq!(selected["result"]["session_invalidated"], true);
+    assert_eq!(selected["next_seq"], 2);
     assert_eq!(model.snapshot()["session_id"], Value::Null);
 
     let replacement = model
@@ -646,6 +647,38 @@ fn unknown_inhibit_or_ptt_sense_releases_immediately() {
         assert_eq!(model.snapshot()["commanded"], "inactive");
         assert_eq!(model.snapshot()["last_release_code"], release);
         assert_eq!(model.snapshot()["safety_state"], state);
+    }
+}
+
+#[test]
+fn prohibited_radio_writes_are_rejected_before_io() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    for command_type in [
+        "power_write",
+        "VOX_write",
+        "mode_write",
+        "menu_write",
+        "baud_write",
+    ] {
+        let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": "00000000000000000000000000000001",
+                "seq": 1,
+                "command": {"type": command_type}
+            }))
+            .expect("prohibited radio request");
+        assert_eq!(
+            model.snapshot()["last_result"]["error"]["code"],
+            "unsupported_radio_operation"
+        );
+        assert_eq!(
+            model.snapshot()["last_result"]["error"]["radio_io_attempted"],
+            false
+        );
+        assert_eq!(model.snapshot()["radio_io_count"], 0);
     }
 }
 

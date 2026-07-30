@@ -151,6 +151,11 @@ for protocol_boundary in (
     'strcmp(type, "radio_mode_read")',
     'strcmp(type, "radio_tx_state_read")',
     'strcmp(type, "RX")',
+    'strcmp(type, "power_write")',
+    'strcmp(type, "VOX_write")',
+    'strcmp(type, "mode_write")',
+    'strcmp(type, "menu_write")',
+    'strcmp(type, "baud_write")',
     '\\"status_seq\\":%llu',
     "rt_radio_execute_typed(&request, &outcome)",
     "rt_safety_intent_begin(",
@@ -279,6 +284,9 @@ for safety_health_boundary in (
     "#define ASSERTION_CHECK_MS (RELEASE_MAX_MS - SAFETY_PERIOD_MS)",
     "now >= assertion_deadline_ms",
     "rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true)",
+    "static bool capped_intent_present",
+    "strcmp(capped_intent_id, intent_id) == 0",
+    "release_inhibit && inputs->ptt_out_known",
 ):
     if safety_health_boundary not in safety_source:
         error(f"safety health-loss boundary is missing: {safety_health_boundary}")

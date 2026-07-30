@@ -1316,7 +1316,13 @@ static void command_result(const char *type, char *json, size_t json_length,
 	} else if (strcmp(type, "raw_cat") == 0 || strcmp(type, "TX") == 0 ||
 		   strcmp(type, "RX") == 0 ||
 		   strcmp(type, "SWT") == 0 || strcmp(type, "SWH") == 0 ||
-		   strcmp(type, "KY") == 0 || strstr(type, "key") != NULL ||
+		   strcmp(type, "KY") == 0 ||
+		   strcmp(type, "power_write") == 0 ||
+		   strcmp(type, "VOX_write") == 0 ||
+		   strcmp(type, "mode_write") == 0 ||
+		   strcmp(type, "menu_write") == 0 ||
+		   strcmp(type, "baud_write") == 0 ||
+		   strstr(type, "key") != NULL ||
 		   strstr(type, "tune") != NULL || strstr(type, "xmit") != NULL ||
 		   strncmp(type, "radio_", 6) == 0) {
 		command_error(body, capacity, "unsupported_radio_operation", "none");

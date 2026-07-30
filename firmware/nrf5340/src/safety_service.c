@@ -31,6 +31,8 @@ static char expired_lease_ids[MAX_SESSION_OPERATIONS][33];
 static size_t expired_lease_count;
 static bool assertion_pending;
 static uint64_t assertion_deadline_ms;
+static bool capped_intent_present;
+static char capped_intent_id[33];
 
 static void status_notify_work_handler(struct k_work *work)
 {
@@ -144,6 +146,10 @@ static void refresh_rearm_locked(uint64_t now)
 
 static void release_locked(enum rt_release_cause cause, bool lockout)
 {
+	if (cause == RT_RELEASE_CONTINUOUS_CAP && state.intent_present) {
+		capped_intent_present = true;
+		strcpy(capped_intent_id, state.intent_id);
+	}
 	ptt_output_inactive();
 	rt_audio_mute_tx();
 	if (cause == RT_RELEASE_LEASE_EXPIRED && state.owner_present) {
@@ -277,7 +283,10 @@ void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 	k_mutex_unlock(&safety_lock);
 	status_changed();
 
-	if (output_mismatch) {
+	if (release_inhibit && inputs->ptt_out_known &&
+	    !inputs->ptt_out_active) {
+		rt_safety_release(RT_RELEASE_INHIBIT, false);
+	} else if (output_mismatch) {
 		rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true);
 	} else if (release_inhibit) {
 		rt_safety_release(RT_RELEASE_INHIBIT, false);
@@ -487,15 +496,23 @@ bool rt_safety_operator_release(const char *intent_id)
 {
 	bool accepted;
 	k_mutex_lock(&safety_lock, K_FOREVER);
-	accepted = !state.intent_present ||
-		   strcmp(state.intent_id, intent_id) == 0;
-	if (accepted &&
-	    state.state == RT_FAULT_LOCKOUT && state.first_fault_present &&
-	    state.first_fault == RT_RELEASE_CONTINUOUS_CAP) {
+	bool continuous_cap =
+		state.state == RT_FAULT_LOCKOUT && state.first_fault_present &&
+		state.first_fault == RT_RELEASE_CONTINUOUS_CAP;
+	if (continuous_cap) {
+		accepted = capped_intent_present &&
+			   strcmp(capped_intent_id, intent_id) == 0;
+	} else {
+		accepted = !state.intent_present ||
+			   strcmp(state.intent_id, intent_id) == 0;
+	}
+	if (accepted && continuous_cap) {
 		ptt_output_inactive();
 		rt_audio_mute_tx();
 		clear_owner_locked();
 		clear_intent_locked();
+		capped_intent_present = false;
+		capped_intent_id[0] = '\0';
 		state.cap_release_reported = true;
 		state.last_release = RT_RELEASE_OPERATOR;
 		state.last_release_at_ms = rt_monotonic_ms();
@@ -533,6 +550,8 @@ enum rt_recovery_result rt_safety_recover(uint32_t fault_id)
 		state.cap_release_reported = false;
 		state.rearm_started_present = false;
 		state.rearm_started_ms = 0;
+		capped_intent_present = false;
+		capped_intent_id[0] = '\0';
 		result = RT_RECOVERY_OK;
 	}
 	k_mutex_unlock(&safety_lock);
@@ -638,6 +657,8 @@ int rt_safety_init(void)
 		.last_release_at_ms = 0,
 	};
 	expired_lease_count = 0;
+	capped_intent_present = false;
+	capped_intent_id[0] = '\0';
 	ptt_output_inactive();
 	rt_audio_mute_tx();
 
