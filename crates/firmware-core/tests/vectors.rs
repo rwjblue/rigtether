@@ -183,8 +183,9 @@ fn exact_reassembled_bytes_drive_idempotency() {
     assert_eq!(first["accepted_at_ms"], 0);
     assert_eq!(first["next_seq"], 2);
     assert_eq!(first["ok"], true);
-    assert_eq!(first["result"]["status_seq"], 1);
+    assert_eq!(first["result"]["status_seq"], 2);
     let status = model.protocol_status();
+    assert_eq!(status["status_seq"], 2);
     assert_eq!(status["health"]["ble_link"], "connected");
     assert_eq!(status["health"]["protocol_session"], "active");
     assert_eq!(status["health"]["host_usb_audio_route"], "healthy");

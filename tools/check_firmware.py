@@ -158,6 +158,8 @@ for protocol_boundary in (
     "decoded_keys_equal(json, &object_keys[index]",
     "#define MAX_JSON_DEPTH MAX_LOGICAL_BYTES",
     "static struct json_frame json_stack[MAX_JSON_DEPTH]",
+    "static char command_json[MAX_LOGICAL_BYTES]",
+    "static char json[MAX_LOGICAL_BYTES + 1]",
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")

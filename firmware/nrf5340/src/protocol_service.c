@@ -802,7 +802,8 @@ static int handle_session_start(char *json, size_t json_length,
 				size_t *response_length)
 {
 	struct session_start_message message = {0};
-	char rendered[MAX_LOGICAL_BYTES];
+	/* protocol_lock serializes this bounded scratch storage. */
+	static char rendered[MAX_LOGICAL_BYTES];
 	int64_t parsed = json_obj_parse(json, json_length, session_start_descr,
 					ARRAY_SIZE(session_start_descr), &message);
 	const int64_t required = BIT_MASK(ARRAY_SIZE(session_start_descr));
@@ -1199,10 +1200,11 @@ static int handle_request(char *json, size_t json_length,
 			  uint64_t status_sequence)
 {
 	struct request_message message = {0};
-	char rendered[MAX_LOGICAL_BYTES];
-	char command_json[MAX_LOGICAL_BYTES];
-	char command_fields_json[MAX_LOGICAL_BYTES];
-	char body[640];
+	/* Keep multi-kilobyte request scratch off the bounded Bluetooth RX stack. */
+	static char rendered[MAX_LOGICAL_BYTES];
+	static char command_json[MAX_LOGICAL_BYTES];
+	static char command_fields_json[MAX_LOGICAL_BYTES];
+	static char body[640];
 	int64_t parsed = json_obj_parse(json, json_length, request_descr,
 					ARRAY_SIZE(request_descr), &message);
 	const int64_t required = BIT_MASK(ARRAY_SIZE(request_descr));
@@ -1438,7 +1440,8 @@ int rt_protocol_handle_logical(const uint8_t *request, size_t request_length,
 	if (request_length == 0 || request_length > MAX_LOGICAL_BYTES) {
 		return -EMSGSIZE;
 	}
-	char json[MAX_LOGICAL_BYTES + 1];
+	/* protocol_lock makes the input scratch safe for the synchronous handler. */
+	static char json[MAX_LOGICAL_BYTES + 1];
 	char envelope_type[16];
 	memcpy(json, request, request_length);
 	json[request_length] = '\0';

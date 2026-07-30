@@ -490,6 +490,7 @@ impl Model {
                 }
             }
         }
+        self.status_seq = self.status_seq.saturating_add(1);
         self.last_result
             .clone()
             .ok_or_else(|| "logical message produced no response".to_owned())
@@ -775,7 +776,7 @@ impl Model {
         match command_type {
             "status_read" => ok(json!({
                 "type": command_type,
-                "status_seq": self.status_seq
+                "status_seq": self.status_seq.saturating_add(1)
             })),
             "host_audio_route_report" => {
                 let Some(health) = command.get("health").and_then(Value::as_str) else {
