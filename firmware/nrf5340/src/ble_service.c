@@ -330,7 +330,9 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 		command_transfer.active = false;
 		command_transfer.accepted = 0;
 		rt_diag_record(RT_EVENT_PROTOCOL_FAULT, 0);
-		rt_safety_protocol_fault();
+		if (rt_protocol_session_active()) {
+			rt_safety_protocol_fault();
+		}
 		return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
 	}
 	return len;

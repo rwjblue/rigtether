@@ -477,8 +477,18 @@ impl Model {
         match object.get("type").and_then(Value::as_str) {
             Some("request") => self.request_with_bytes(&object, Some(raw))?,
             Some("session_start") => self.session_start_with_bytes(&object, Some(raw))?,
-            Some(other) => return Err(format!("unsupported logical message type {other}")),
-            None => return Err("logical message lacks type".to_owned()),
+            unsupported => {
+                let active = self.session_id.is_some();
+                if active {
+                    self.lockout("protocol_fault");
+                    self.last_result = Some(error("malformed", "lockout", false));
+                } else {
+                    return Err(unsupported.map_or_else(
+                        || "logical message lacks type".to_owned(),
+                        |other| format!("unsupported logical message type {other}"),
+                    ));
+                }
+            }
         }
         self.last_result
             .clone()
@@ -1049,6 +1059,7 @@ impl Model {
             .and_then(Value::as_str)
             .map(str::to_owned);
         if (exact_bytes.is_some() && (request_boot_id.is_none() || request_session_id.is_none()))
+            || (exact_bytes.is_some() && event.get("v") != Some(&json!({"major": 0, "minor": 0})))
             || op_id.is_none_or(|id| !is_hex_id(id))
             || seq.is_none()
             || command

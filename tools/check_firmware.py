@@ -131,6 +131,7 @@ for envelope_field in (
         error(f"nRF logical response is missing v0 envelope field: {envelope_field}")
 for protocol_boundary in (
     "extract_top_level_type(request, request_length",
+    "validate_no_duplicate_members(request, request_length)",
     "rt_operation_cache_lookup(",
     "rt_operation_cache_store(",
     "rt_protocol_att_limit_changed",
@@ -172,6 +173,7 @@ for ble_boundary in (
     "rt_protocol_att_limit_changed();",
     "BT_ATT_ERR_INSUFFICIENT_RESOURCES",
     "command_transfer.accepted = 0",
+    "rt_protocol_session_active()",
 ):
     if ble_boundary not in ble_source:
         error(f"BLE snapshot/session transition boundary is missing: {ble_boundary}")

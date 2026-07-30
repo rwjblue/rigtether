@@ -226,3 +226,25 @@ fn raw_session_start_requires_explicit_boot_identity() {
     assert_eq!(denial["error"]["safety_effect"], "none");
     assert_eq!(model.snapshot()["session_id"], Value::Null);
 }
+
+#[test]
+fn raw_request_requires_exact_version_and_known_envelope() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+    let wrong_version = br#"{"type":"request","v":{"major":1,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#;
+    let denial = model
+        .handle_logical(wrong_version)
+        .expect("unsupported request version is a protocol denial");
+    assert_eq!(denial["error"]["code"], "malformed");
+    assert_eq!(model.snapshot()["next_seq"], 1);
+    assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    let denial = model
+        .handle_logical(br#"{"type":"unknown"}"#)
+        .expect("unknown current-session envelope is a protocol denial");
+    assert_eq!(denial["error"]["code"], "malformed");
+    assert_eq!(denial["error"]["safety_effect"], "lockout");
+    assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+}

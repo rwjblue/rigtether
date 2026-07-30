@@ -329,6 +329,135 @@ static int extract_top_level_type(const uint8_t *json, size_t length,
 	return -EINVAL;
 }
 
+struct key_slice {
+	size_t start;
+	size_t length;
+};
+
+static struct key_slice object_keys[8][24];
+
+static int validate_json_value(const uint8_t *json, size_t length,
+			       size_t *offset, size_t depth);
+
+static int validate_json_object(const uint8_t *json, size_t length,
+				size_t *offset, size_t depth)
+{
+	if (depth >= ARRAY_SIZE(object_keys) || json[(*offset)++] != '{') {
+		return -EINVAL;
+	}
+	size_t key_count = 0;
+	skip_whitespace(json, length, offset);
+	if (*offset < length && json[*offset] == '}') {
+		(*offset)++;
+		return 0;
+	}
+	while (*offset < length) {
+		size_t key_start;
+		size_t key_length;
+		if (key_count >= ARRAY_SIZE(object_keys[depth]) ||
+		    string_bounds(json, length, offset, &key_start, &key_length) != 0) {
+			return -EINVAL;
+		}
+		for (size_t index = 0; index < key_count; ++index) {
+			if (object_keys[depth][index].length == key_length &&
+			    memcmp(&json[object_keys[depth][index].start],
+				   &json[key_start], key_length) == 0) {
+				return -EEXIST;
+			}
+		}
+		object_keys[depth][key_count++] =
+			(struct key_slice){.start = key_start, .length = key_length};
+		skip_whitespace(json, length, offset);
+		if (*offset >= length || json[(*offset)++] != ':') {
+			return -EINVAL;
+		}
+		if (validate_json_value(json, length, offset, depth + 1) != 0) {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, offset);
+		if (*offset >= length) {
+			return -EINVAL;
+		}
+		uint8_t delimiter = json[(*offset)++];
+		if (delimiter == '}') {
+			return 0;
+		}
+		if (delimiter != ',') {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, offset);
+	}
+	return -EINVAL;
+}
+
+static int validate_json_array(const uint8_t *json, size_t length,
+			       size_t *offset, size_t depth)
+{
+	if (json[(*offset)++] != '[') {
+		return -EINVAL;
+	}
+	skip_whitespace(json, length, offset);
+	if (*offset < length && json[*offset] == ']') {
+		(*offset)++;
+		return 0;
+	}
+	while (*offset < length) {
+		if (validate_json_value(json, length, offset, depth + 1) != 0) {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, offset);
+		if (*offset >= length) {
+			return -EINVAL;
+		}
+		uint8_t delimiter = json[(*offset)++];
+		if (delimiter == ']') {
+			return 0;
+		}
+		if (delimiter != ',') {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, offset);
+	}
+	return -EINVAL;
+}
+
+static int validate_json_value(const uint8_t *json, size_t length,
+			       size_t *offset, size_t depth)
+{
+	if (depth >= ARRAY_SIZE(object_keys)) {
+		return -EINVAL;
+	}
+	skip_whitespace(json, length, offset);
+	if (*offset >= length) {
+		return -EINVAL;
+	}
+	if (json[*offset] == '{') {
+		return validate_json_object(json, length, offset, depth);
+	}
+	if (json[*offset] == '[') {
+		return validate_json_array(json, length, offset, depth);
+	}
+	if (json[*offset] == '"') {
+		size_t start;
+		size_t value_length;
+		return string_bounds(json, length, offset, &start, &value_length);
+	}
+	size_t start = *offset;
+	while (*offset < length && json[*offset] != ',' && json[*offset] != '}' &&
+	       json[*offset] != ']') {
+		(*offset)++;
+	}
+	return *offset == start ? -EINVAL : 0;
+}
+
+static int validate_no_duplicate_members(const uint8_t *json, size_t length)
+{
+	size_t offset = 0;
+	int result = validate_json_value(json, length, &offset, 0);
+	skip_whitespace(json, length, &offset);
+	return result == 0 && offset == length ? 0 : -EINVAL;
+}
+
 static bool exact_capability_set(const struct session_start_message *message)
 {
 	if (message->required_capabilities_len != CAPABILITY_COUNT) {
@@ -953,6 +1082,14 @@ bool rt_protocol_session_id(char session_id[33])
 	return active;
 }
 
+bool rt_protocol_session_active(void)
+{
+	k_mutex_lock(&protocol_lock, K_FOREVER);
+	bool active = session_active;
+	k_mutex_unlock(&protocol_lock);
+	return active;
+}
+
 int rt_protocol_handle_logical(const uint8_t *request, size_t request_length,
 			       uint8_t *response, size_t response_capacity,
 			       size_t *response_length)
@@ -964,10 +1101,12 @@ int rt_protocol_handle_logical(const uint8_t *request, size_t request_length,
 	char envelope_type[16];
 	memcpy(json, request, request_length);
 	json[request_length] = '\0';
-	int parsed =
-		extract_top_level_type(request, request_length, envelope_type,
-				       sizeof(envelope_type));
 	k_mutex_lock(&protocol_lock, K_FOREVER);
+	int parsed = validate_no_duplicate_members(request, request_length);
+	if (parsed == 0) {
+		parsed = extract_top_level_type(request, request_length, envelope_type,
+					       sizeof(envelope_type));
+	}
 	int result;
 	if (parsed != 0) {
 		if (session_active) {
