@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/elecraft-cat"]
+members = ["crates/elecraft-cat", "crates/firmware-core"]
 resolver = "2"
 
 [workspace.package]

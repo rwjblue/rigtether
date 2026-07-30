@@ -1,0 +1,18 @@
+menu "RigTether M1 fixture"
+
+config RIGTETHER_PTT_OUTPUT_ENABLED
+	bool "Enable the radio-disconnected PTT fixture output"
+	default n
+	help
+	  Keep disabled until issue #13 defines and validates the normally-open output,
+	  inhibit, downstream sense input, and pin assignment. This option must never be
+	  enabled for a live-radio unattended build.
+
+config RIGTETHER_FAULT_INJECTION
+	bool "Enable labeled bench-only fault injection"
+	default n
+	help
+	  Enables only fault inputs that release or deny PTT. It cannot assert PTT or
+	  feed the watchdog.
+
+endmenu

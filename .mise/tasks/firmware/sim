@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run the radio-disconnected M1 firmware simulator and shared vectors"
+set -euo pipefail
+cargo test -p rigtether-firmware-core

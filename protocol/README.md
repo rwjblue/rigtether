@@ -422,6 +422,8 @@ Allowed high-level health values are:
 - `host_usb_audio_route`: `unknown`, `healthy`, or `unhealthy`;
 - `device_usb_audio.aggregate`: `unknown`, `healthy`, or `unhealthy`;
 - `radio_profile`: `none`, `validating`, `ready`, or `faulted`;
+- `radio.observed_tx`: `null` without current CAT evidence, otherwise `receive` or
+  `transmit_or_pseudo_transmit`;
 - `ptt.commanded`: `inactive` or `active`;
 - `ptt.ptt_out`: `unknown`, `inactive`, or `active`;
 - `ptt.inhibit`: `unknown`, `open`, or `closed`; and
