@@ -134,7 +134,7 @@ static ssize_t read_hello(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	return result;
 }
 
-static size_t render_status(char *target, size_t capacity)
+static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 {
 	struct rt_safety_snapshot snapshot;
 	struct rt_audio_health audio;
@@ -183,9 +183,8 @@ static size_t render_status(char *target, size_t capacity)
 	ptt_out = !snapshot.inputs.ptt_out_known ? "unknown" :
 		  snapshot.inputs.ptt_out_active  ? "active" :
 						     "inactive";
-	observed_tx = snapshot.inputs.ptt_out_known && snapshot.inputs.ptt_out_active ?
-			      "transmit_or_pseudo_transmit" :
-			      "receive";
+	/* PTT sensing is not evidence of the radio's complete transmit state. */
+	observed_tx = "null";
 	inhibit = snapshot.inputs.inhibit_closed ? "closed" : "open";
 	release_code = release_cause_name(snapshot.last_release);
 	if (snapshot.first_fault_present) {
@@ -201,6 +200,9 @@ static size_t render_status(char *target, size_t capacity)
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	rendered_status_seq = ++status_seq;
 	k_mutex_unlock(&ble_lock);
+	if (sequence != NULL) {
+		*sequence = rendered_status_seq;
+	}
 	snprintk(target, capacity,
 		 "{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
 		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":%s,"
@@ -211,7 +213,7 @@ static size_t render_status(char *target, size_t capacity)
 		 "\"tx_stream\":\"%s\",\"clock\":\"%s\","
 		 "\"buffers\":\"%s\",\"converter\":\"%s\"},"
 		 "\"radio_profile\":\"%s\"},\"radio\":{\"profile\":null,"
-		 "\"observed_tx\":\"%s\"},\"ptt\":{\"commanded\":\"%s\","
+		 "\"observed_tx\":%s},\"ptt\":{\"commanded\":\"%s\","
 		 "\"ptt_out\":\"%s\",\"inhibit\":\"%s\",\"owner\":null,"
 		 "\"lease_deadline_ms\":null,\"continuous_started_ms\":null,"
 		 "\"continuous_elapsed_ms\":0,\"safety_state\":\"%s\","
@@ -241,7 +243,7 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 {
 	if (offset == 0) {
 		char rendered[sizeof(status_value)];
-		size_t rendered_length = render_status(rendered, sizeof(rendered));
+		size_t rendered_length = render_status(rendered, sizeof(rendered), NULL);
 		k_mutex_lock(&ble_lock, K_FOREVER);
 		memcpy(status_value, rendered, rendered_length + 1);
 		k_mutex_unlock(&ble_lock);
@@ -628,17 +630,11 @@ int rt_ble_publish_status(const uint8_t *value, uint16_t length)
 	return result;
 }
 
-void rt_ble_notify_status(void)
+uint64_t rt_ble_notify_status(void)
 {
 	char rendered[sizeof(status_value)];
-	size_t length = render_status(rendered, sizeof(rendered));
+	uint64_t sequence;
+	size_t length = render_status(rendered, sizeof(rendered), &sequence);
 	(void)rt_ble_publish_status((const uint8_t *)rendered, length);
-}
-
-uint64_t rt_ble_status_seq(void)
-{
-	k_mutex_lock(&ble_lock, K_FOREVER);
-	uint64_t value = status_seq;
-	k_mutex_unlock(&ble_lock);
-	return value;
+	return sequence;
 }

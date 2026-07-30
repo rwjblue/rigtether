@@ -15,6 +15,8 @@
 
 #define MAX_LOGICAL_BYTES 1024
 #define CAPABILITY_COUNT 5
+#define MAX_JSON_DEPTH 8
+#define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)
 
 struct version {
 	uint64_t major;
@@ -334,7 +336,13 @@ struct key_slice {
 	size_t length;
 };
 
-static struct key_slice object_keys[8][24];
+/*
+ * The smallest JSON member is four bytes excluding its separator. Deriving this
+ * bound from the logical-message ceiling covers every object that can fit, so
+ * duplicate detection adds no independent member-count limit.
+ */
+static struct key_slice
+	object_keys[MAX_JSON_DEPTH][MAX_JSON_OBJECT_MEMBERS];
 
 static int validate_json_value(const uint8_t *json, size_t length,
 			       size_t *offset, size_t depth);
@@ -705,10 +713,11 @@ static void command_result(const char *type, char *json, size_t json_length,
 {
 	*invalidate_session = false;
 	if (strcmp(type, "status_read") == 0) {
+		uint64_t published_status_seq = rt_ble_notify_status();
 		snprintk(body, capacity,
 			 "\"ok\":true,\"result\":{\"type\":\"status_read\","
 			 "\"status_seq\":%llu}",
-			 (unsigned long long)rt_ble_status_seq());
+			 (unsigned long long)published_status_seq);
 	} else if (strcmp(type, "host_audio_route_report") == 0) {
 		struct health_command command = {0};
 		int64_t parsed = json_obj_parse(json, json_length,

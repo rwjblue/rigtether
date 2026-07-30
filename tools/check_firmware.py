@@ -152,12 +152,18 @@ for protocol_boundary in (
     '\\"status_seq\\":%llu',
     "rt_radio_execute_typed(&request, &outcome)",
     "if (identity[index] != '0')",
+    "published_status_seq = rt_ble_notify_status()",
+    "#define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)",
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
 
 if "simulator_frequency_hz" in protocol_source:
     error("nRF radio-disconnected image must not manufacture simulated CAT success")
+if "object_keys[8][24]" in protocol_source:
+    error("strict JSON duplicate detection must not impose a 24-member limit")
+if 'observed_tx = "null"' not in ble_source:
+    error("nRF status must not infer radio transmit state from sensed PTT")
 
 radio_source = (ROOT / "firmware/nrf5340/src/radio_service.c").read_text(
     encoding="utf-8"

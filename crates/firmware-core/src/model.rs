@@ -410,7 +410,7 @@ impl Model {
             },
             "radio": {
                 "profile": self.radio_profile,
-                "observed_tx": "receive"
+                "observed_tx": null
             },
             "ptt": {
                 "commanded": self.commanded,
@@ -590,7 +590,15 @@ impl Model {
         exact_bytes: Option<&[u8]>,
     ) -> Result<(), String> {
         if exact_bytes.is_some() && event.get("boot_id").and_then(Value::as_str).is_none() {
-            self.last_result = Some(error("malformed", "none", false));
+            let active = self.session_id.is_some();
+            if active {
+                self.lockout("protocol_fault");
+            }
+            self.last_result = Some(error(
+                "malformed",
+                if active { "lockout" } else { "none" },
+                false,
+            ));
             return Ok(());
         }
         let request_bytes = if let Some(bytes) = exact_bytes {
