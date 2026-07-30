@@ -1018,13 +1018,24 @@ static void typed_radio_result(enum rt_radio_operation operation,
 					   "radio_control_fault" :
 					   outcome.error_code;
 		if (strcmp(code, "radio_control_fault") == 0) {
-			/* Release and latch first cause before any profile bookkeeping. */
-			rt_safety_release(RT_RELEASE_RADIO_CONTROL, true);
 			struct rt_safety_snapshot snapshot;
 			rt_safety_snapshot(&snapshot);
+			bool authority_active =
+				snapshot.state == RT_TX_ACTIVE &&
+				snapshot.commanded_ptt && snapshot.owner_present;
+			if (authority_active) {
+				/*
+				 * Release and latch first cause before profile
+				 * bookkeeping while transmit authority is active.
+				 */
+				rt_safety_release(RT_RELEASE_RADIO_CONTROL, true);
+				rt_safety_snapshot(&snapshot);
+			}
 			snapshot.inputs.radio_profile = RT_HEALTH_UNHEALTHY;
 			rt_safety_update_inputs(&snapshot.inputs);
-			command_error_with_io(body, capacity, code, "lockout", true);
+			command_error_with_io(body, capacity, code,
+					      authority_active ? "lockout" : "none",
+					      true);
 		} else {
 			command_error(body, capacity, code, "none");
 		}

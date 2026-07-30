@@ -74,14 +74,20 @@ fn typed_cat_fixture_is_used_without_raw_escape_hatch() {
     );
     assert_eq!(radio.cat().io().attempts().len(), 6);
 
-    let identify = radio.execute(&json!({
-        "type": "radio_identify",
-        "forward_compatible_extension": {"ignored": true}
-    }));
+    let identify = radio.execute(&json!({"type": "radio_identify"}));
     assert!(identify.ok);
     assert_eq!(radio.cat().io().attempts().len(), 7);
 
     let attempts = radio.cat().io().attempts().len();
+    let unexpected = radio.execute(&json!({
+        "type": "radio_identify",
+        "unexpected": true
+    }));
+    assert!(!unexpected.ok);
+    assert_eq!(unexpected.error_code, Some("invalid_argument"));
+    assert!(!unexpected.radio_io_attempted);
+    assert_eq!(radio.cat().io().attempts().len(), attempts);
+
     let raw = radio.execute(&json!({"type": "raw_cat", "command": "TX;"}));
     assert!(!raw.ok);
     assert_eq!(raw.error_code, Some("unsupported_radio_operation"));

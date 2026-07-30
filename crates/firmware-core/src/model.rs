@@ -790,6 +790,9 @@ impl Model {
         let Some(command_type) = command.get("type").and_then(Value::as_str) else {
             return error("invalid_argument", "none", false);
         };
+        if !has_exact_radio_fields(command_type, command) {
+            return error("invalid_argument", "none", false);
+        }
         match command_type {
             "status_read" => ok(json!({
                 "type": command_type,
@@ -1049,7 +1052,7 @@ impl Model {
         self.radio_io_count += 1;
         if observed != expected {
             self.profile = "faulted".to_owned();
-            let transmitting = self.safety_state == "tx_active";
+            let transmitting = self.commanded == "active" && self.lease_id.is_some();
             if transmitting {
                 self.lockout("radio_control_fault");
             }
@@ -1148,6 +1151,12 @@ impl Model {
             .map(str::to_owned);
         if (exact_bytes.is_some() && (request_boot_id.is_none() || request_session_id.is_none()))
             || (exact_bytes.is_some() && event.get("v") != Some(&json!({"major": 0, "minor": 0})))
+            || request_boot_id
+                .as_deref()
+                .is_some_and(|identity| !is_hex_id(identity))
+            || request_session_id
+                .as_deref()
+                .is_some_and(|identity| !is_hex_id(identity))
             || op_id.is_none_or(|id| !is_hex_id(id))
             || seq.is_none()
             || command
@@ -1552,6 +1561,22 @@ fn is_hex_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|character| character.is_ascii_digit() || (b'a'..=b'f').contains(&character))
+}
+
+fn has_exact_radio_fields(command_type: &str, command: &Map<String, Value>) -> bool {
+    let expected = match command_type {
+        "radio_profile_select" => &["type", "profile"][..],
+        "radio_vfo_a_set" => &["type", "frequency_hz"][..],
+        "radio_session_normalize"
+        | "radio_identify"
+        | "radio_firmware_read"
+        | "radio_vfo_a_read"
+        | "radio_operating_state_read"
+        | "radio_mode_read"
+        | "radio_tx_state_read" => &["type"][..],
+        _ => return true,
+    };
+    command.len() == expected.len() && expected.iter().all(|field| command.contains_key(*field))
 }
 
 fn is_prohibited_radio_operation(value: &str) -> bool {

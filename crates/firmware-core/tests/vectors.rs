@@ -902,6 +902,35 @@ fn prohibited_radio_writes_are_rejected_before_io() {
 }
 
 #[test]
+fn receive_safe_radio_fault_marks_profile_without_lockout() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, Some(&serde_json::json!({"radio_profile": "kx3"})))
+        .expect("initial state");
+    model
+        .event(&serde_json::json!({
+            "action": "inject_radio_identity",
+            "product_code": 1
+        }))
+        .expect("mismatched identity");
+    model
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000001",
+            "seq": 1,
+            "command": {"type": "radio_identify"}
+        }))
+        .expect("radio identity request");
+    assert_eq!(model.snapshot()["profile"], "faulted");
+    assert_eq!(model.snapshot()["safety_state"], "receive_safe");
+    assert_eq!(model.snapshot()["first_fault_code"], Value::Null);
+    assert_eq!(
+        model.snapshot()["last_result"]["error"]["safety_effect"],
+        "none"
+    );
+}
+
+#[test]
 fn raw_request_requires_exact_version_and_known_envelope() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
@@ -921,6 +950,21 @@ fn raw_request_requires_exact_version_and_known_envelope() {
     assert_eq!(denial["error"]["code"], "malformed");
     assert_eq!(denial["error"]["safety_effect"], "lockout");
     assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+
+    for malformed_identity in [
+        br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"not-a-boot-id","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#
+            .as_slice(),
+        br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"not-a-session-id","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#
+            .as_slice(),
+    ] {
+        let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+        let denial = model
+            .handle_logical(malformed_identity)
+            .expect("malformed identity response");
+        assert_eq!(denial["error"]["code"], "malformed");
+        assert_eq!(denial["error"]["safety_effect"], "lockout");
+        assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+    }
 
     let mut model = Model::from_initial(
         ids,
@@ -945,7 +989,7 @@ fn raw_request_requires_exact_version_and_known_envelope() {
 }
 
 #[test]
-fn radio_commands_ignore_unknown_optional_fields() {
+fn radio_commands_reject_unknown_fields_before_io() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
     let commands = [
@@ -1004,7 +1048,9 @@ fn radio_commands_ignore_unknown_optional_fields() {
         let response = model
             .handle_logical(&encoded)
             .expect("extension-bearing command");
-        assert_eq!(response["ok"], true, "{request}");
+        assert_eq!(response["error"]["code"], "invalid_argument", "{request}");
+        assert_eq!(response["error"]["radio_io_attempted"], false, "{request}");
+        assert_eq!(model.snapshot()["radio_io_count"], 0, "{request}");
     }
 }
 

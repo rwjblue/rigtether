@@ -75,6 +75,9 @@ impl<I: RadioIo> TypedRadio<I> {
         let Some(command_type) = object.get("type").and_then(Value::as_str) else {
             return invalid_argument();
         };
+        if !has_exact_radio_fields(command_type, object) {
+            return invalid_argument();
+        }
         let request = match command_type {
             "radio_session_normalize" => Request::Typed(Operation::NormalizeSession),
             "radio_identify" => Request::Typed(Operation::Identify),
@@ -106,6 +109,21 @@ impl<I: RadioIo> TypedRadio<I> {
             Err(error) => RadioOutcome::error(&error),
         }
     }
+}
+
+fn has_exact_radio_fields(command_type: &str, object: &serde_json::Map<String, Value>) -> bool {
+    let expected = match command_type {
+        "radio_vfo_a_set" => &["type", "frequency_hz"][..],
+        "radio_session_normalize"
+        | "radio_identify"
+        | "radio_firmware_read"
+        | "radio_vfo_a_read"
+        | "radio_operating_state_read"
+        | "radio_mode_read"
+        | "radio_tx_state_read" => &["type"][..],
+        _ => return true,
+    };
+    object.len() == expected.len() && expected.iter().all(|field| object.contains_key(*field))
 }
 
 fn invalid_argument() -> RadioOutcome {

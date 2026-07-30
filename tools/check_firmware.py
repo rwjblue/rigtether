@@ -177,7 +177,8 @@ for protocol_boundary in (
     'strcmp(command.reason, "operator_release")',
     "message.client_rx_frame_limit, (uint64_t)UINT16_MAX",
     "rt_safety_release(RT_RELEASE_RADIO_CONTROL, true)",
-    'command_error_with_io(body, capacity, code, "lockout", true)',
+    "snapshot.commanded_ptt && snapshot.owner_present",
+    'authority_active ? "lockout" : "none"',
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
@@ -250,6 +251,20 @@ for status_render_boundary in (
             "status rendering can publish truncated logical JSON: "
             f"{status_render_boundary}"
         )
+
+publish_response_body = re.search(
+    r"int rt_ble_publish_response\(.*?\n\}", ble_source, re.DOTALL
+)
+if publish_response_body is None or not all(
+    boundary in publish_response_body.group()
+    for boundary in (
+        "queued != 0 && queued != -ENOSPC",
+        "rt_safety_protocol_fault();",
+        "rt_protocol_disconnect();",
+        "rt_response_queue_reset();",
+    )
+):
+    error("response-queue storage faults must end protocol authority")
 
 monotonic_source = (ROOT / "firmware/nrf5340/src/monotonic.c").read_text(
     encoding="utf-8"

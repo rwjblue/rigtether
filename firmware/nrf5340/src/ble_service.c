@@ -783,6 +783,16 @@ int rt_ble_publish_response(const uint8_t *value, uint16_t length)
 	if (response_transfer.active) {
 		int queued = rt_response_queue_enqueue(value, length);
 		k_mutex_unlock(&ble_lock);
+		if (queued != 0 && queued != -ENOSPC) {
+			/*
+			 * Queue capacity is retryable because the cached response can
+			 * be requested again. A storage write fault cannot retain
+			 * protocol or transmit authority.
+			 */
+			rt_safety_protocol_fault();
+			rt_protocol_disconnect();
+			(void)rt_response_queue_reset();
+		}
 		return queued;
 	}
 	response_transfer.active = true;
