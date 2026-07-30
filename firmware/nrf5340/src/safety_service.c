@@ -49,7 +49,8 @@ static void ptt_output_inactive(void)
 static bool inputs_allow_receive_safe(void)
 {
 	return !state.commanded_ptt && state.inputs.ptt_out_known &&
-	       !state.inputs.ptt_out_active && state.inputs.inhibit_closed &&
+	       !state.inputs.ptt_out_active && state.inputs.inhibit_known &&
+	       state.inputs.inhibit_closed &&
 	       state.inputs.host_route == RT_HEALTH_HEALTHY &&
 	       state.inputs.device_audio == RT_HEALTH_HEALTHY &&
 	       state.inputs.ble == RT_HEALTH_HEALTHY &&
@@ -136,6 +137,7 @@ void rt_safety_protocol_fault(void)
 void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 {
 	bool release_audio = false;
+	bool release_host_route = false;
 	bool release_inhibit = false;
 	bool output_mismatch = false;
 
@@ -143,7 +145,10 @@ void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 	state.inputs = *inputs;
 	release_audio = state.commanded_ptt &&
 			inputs->device_audio != RT_HEALTH_HEALTHY;
-	release_inhibit = state.commanded_ptt && !inputs->inhibit_closed;
+	release_host_route = state.commanded_ptt &&
+			     inputs->host_route != RT_HEALTH_HEALTHY;
+	release_inhibit = state.commanded_ptt &&
+			  (!inputs->inhibit_known || !inputs->inhibit_closed);
 	output_mismatch = state.commanded_ptt && inputs->ptt_out_known &&
 			  !inputs->ptt_out_active;
 	k_mutex_unlock(&safety_lock);
@@ -153,6 +158,8 @@ void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 		rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true);
 	} else if (release_inhibit) {
 		rt_safety_release(RT_RELEASE_INHIBIT, false);
+	} else if (release_host_route) {
+		rt_safety_release(RT_RELEASE_HOST_ROUTE, false);
 	} else if (release_audio) {
 		rt_safety_release(RT_RELEASE_DEVICE_AUDIO, false);
 	}
@@ -214,7 +221,8 @@ bool rt_safety_complete_check_and_feed_watchdog(void)
 	complete = !state.commanded_ptt ||
 		   (state.owner_present && state.lease_deadline_ms > now &&
 		    state.lease_deadline_ms - now <= LEASE_MAX_MS &&
-		    state.inputs.inhibit_closed &&
+		    state.inputs.inhibit_known && state.inputs.inhibit_closed &&
+		    state.inputs.host_route == RT_HEALTH_HEALTHY &&
 		    state.inputs.device_audio == RT_HEALTH_HEALTHY &&
 		    state.inputs.ble == RT_HEALTH_HEALTHY &&
 		    state.inputs.protocol_session == RT_HEALTH_HEALTHY &&
@@ -258,6 +266,7 @@ int rt_safety_init(void)
 			.ble = RT_HEALTH_UNHEALTHY,
 			.protocol_session = RT_HEALTH_UNHEALTHY,
 			.radio_profile = RT_HEALTH_UNHEALTHY,
+			.inhibit_known = false,
 			.inhibit_closed = false,
 			.ptt_out_known = false,
 			.ptt_out_active = false,

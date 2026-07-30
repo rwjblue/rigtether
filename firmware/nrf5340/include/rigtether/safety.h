@@ -9,6 +9,7 @@ enum rt_health_state {
 	RT_HEALTH_UNKNOWN,
 	RT_HEALTH_HEALTHY,
 	RT_HEALTH_UNHEALTHY,
+	RT_HEALTH_VALIDATING,
 };
 
 enum rt_safety_state {
@@ -48,6 +49,7 @@ struct rt_safety_inputs {
 	enum rt_health_state ble;
 	enum rt_health_state protocol_session;
 	enum rt_health_state radio_profile;
+	bool inhibit_known;
 	bool inhibit_closed;
 	bool ptt_out_known;
 	bool ptt_out_active;

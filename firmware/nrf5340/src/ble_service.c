@@ -179,6 +179,8 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 		      snapshot.inputs.host_route == RT_HEALTH_UNHEALTHY ? "unhealthy" :
 									"unknown";
 	profile_health = snapshot.inputs.radio_profile == RT_HEALTH_HEALTHY ? "ready" :
+			 snapshot.inputs.radio_profile == RT_HEALTH_VALIDATING ?
+				 "validating" :
 			 snapshot.inputs.radio_profile == RT_HEALTH_UNHEALTHY ?
 				 "faulted" :
 				 "none";
@@ -187,7 +189,9 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 						     "inactive";
 	/* PTT sensing is not evidence of the radio's complete transmit state. */
 	observed_tx = "null";
-	inhibit = snapshot.inputs.inhibit_closed ? "closed" : "open";
+	inhibit = !snapshot.inputs.inhibit_known ? "unknown" :
+		  snapshot.inputs.inhibit_closed  ? "closed" :
+						    "open";
 	release_code = release_cause_name(snapshot.last_release);
 	if (snapshot.first_fault_present) {
 		fault_code = release_cause_name(snapshot.first_fault);
@@ -478,6 +482,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	ARG_UNUSED(conn);
+	/* Release first: flash queue cleanup and protocol teardown are unbounded. */
+	rt_safety_ble_disconnected();
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	if (current_conn != NULL) {
 		bt_conn_unref(current_conn);
@@ -489,9 +495,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	response_client_limit = UINT16_MAX;
 	k_mutex_unlock(&ble_lock);
 	rt_diag_record(RT_EVENT_BLE_DISCONNECTED, reason);
-	(void)rt_response_queue_reset();
 	rt_protocol_disconnect();
-	rt_safety_ble_disconnected();
+	(void)rt_response_queue_reset();
 }
 
 BT_CONN_CB_DEFINE(connection_callbacks) = {

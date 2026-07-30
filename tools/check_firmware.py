@@ -112,6 +112,7 @@ required_snapshot_fields = [
     "snapshot.first_fault",
     "snapshot.inputs.ptt_out_active",
     "snapshot.inputs.inhibit_closed",
+    "snapshot.inputs.inhibit_known",
     "snapshot.inputs.protocol_session",
 ]
 for field in required_snapshot_fields:
@@ -205,6 +206,13 @@ for reset_boundary in (
 ):
     if reset_boundary not in safety_source:
         error(f"watchdog reset-cause diagnostic boundary is missing: {reset_boundary}")
+for safety_health_boundary in (
+    "inputs->host_route != RT_HEALTH_HEALTHY",
+    "RT_RELEASE_HOST_ROUTE",
+    "state.inputs.inhibit_known && state.inputs.inhibit_closed",
+):
+    if safety_health_boundary not in safety_source:
+        error(f"safety health-loss boundary is missing: {safety_health_boundary}")
 
 cache_source = (ROOT / "firmware/nrf5340/src/operation_cache.c").read_text(
     encoding="utf-8"
@@ -228,9 +236,20 @@ for ble_boundary in (
     "BT_ATT_ERR_INSUFFICIENT_RESOURCES",
     "command_transfer.accepted = 0",
     "rt_protocol_session_active()",
+    'snapshot.inputs.radio_profile == RT_HEALTH_VALIDATING',
+    '!snapshot.inputs.inhibit_known ? "unknown"',
 ):
     if ble_boundary not in ble_source:
         error(f"BLE snapshot/session transition boundary is missing: {ble_boundary}")
+
+disconnect_body = re.search(
+    r"static void disconnected\(.*?\n\}", ble_source, re.DOTALL
+)
+if disconnect_body is None or (
+    disconnect_body.group().find("rt_safety_ble_disconnected()")
+    > disconnect_body.group().find("rt_response_queue_reset()")
+):
+    error("BLE disconnect must release PTT before erasing the response queue")
 
 audio_source = (ROOT / "firmware/nrf5340/src/audio_service.c").read_text(
     encoding="utf-8"

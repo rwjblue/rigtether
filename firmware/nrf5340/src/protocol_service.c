@@ -987,7 +987,7 @@ static const char *acquire_precondition(void)
 	if (snapshot.inputs.radio_profile != RT_HEALTH_HEALTHY) {
 		return "profile_not_ready";
 	}
-	if (!snapshot.inputs.inhibit_closed) {
+	if (!snapshot.inputs.inhibit_known || !snapshot.inputs.inhibit_closed) {
 		return "inhibit_open";
 	}
 	if (!snapshot.inputs.ptt_out_known || snapshot.inputs.ptt_out_active) {
@@ -1142,7 +1142,7 @@ static void command_result(const char *type, char *json, size_t json_length,
 			rt_safety_snapshot(&snapshot);
 			snapshot.inputs.protocol_session = RT_HEALTH_UNKNOWN;
 			snapshot.inputs.host_route = RT_HEALTH_UNKNOWN;
-			snapshot.inputs.radio_profile = RT_HEALTH_UNKNOWN;
+			snapshot.inputs.radio_profile = RT_HEALTH_VALIDATING;
 			rt_safety_update_inputs(&snapshot.inputs);
 			rt_radio_select_profile(strcmp(command.profile, "kx2") == 0 ?
 						       RT_RADIO_PROFILE_KX2 :
