@@ -15,7 +15,7 @@
 
 #define MAX_LOGICAL_BYTES 1024
 #define CAPABILITY_COUNT 5
-#define MAX_JSON_DEPTH 8
+#define MAX_JSON_DEPTH MAX_LOGICAL_BYTES
 #define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)
 
 struct version {
@@ -214,6 +214,183 @@ static void skip_whitespace(const uint8_t *json, size_t length, size_t *offset)
 	}
 }
 
+static int hex_digit(uint8_t value)
+{
+	if (value >= '0' && value <= '9') {
+		return value - '0';
+	}
+	if (value >= 'a' && value <= 'f') {
+		return value - 'a' + 10;
+	}
+	if (value >= 'A' && value <= 'F') {
+		return value - 'A' + 10;
+	}
+	return -EINVAL;
+}
+
+static int utf8_codepoint(const uint8_t *json, size_t end, size_t *offset,
+			  uint32_t *codepoint)
+{
+	uint8_t first = json[(*offset)++];
+	if (first < 0x80) {
+		if (first < 0x20) {
+			return -EINVAL;
+		}
+		*codepoint = first;
+		return 0;
+	}
+	size_t continuation_count;
+	uint32_t value;
+	uint32_t minimum;
+	if ((first & 0xe0) == 0xc0) {
+		continuation_count = 1;
+		value = first & 0x1f;
+		minimum = 0x80;
+	} else if ((first & 0xf0) == 0xe0) {
+		continuation_count = 2;
+		value = first & 0x0f;
+		minimum = 0x800;
+	} else if ((first & 0xf8) == 0xf0) {
+		continuation_count = 3;
+		value = first & 0x07;
+		minimum = 0x10000;
+	} else {
+		return -EINVAL;
+	}
+	if (*offset + continuation_count > end) {
+		return -EINVAL;
+	}
+	for (size_t index = 0; index < continuation_count; ++index) {
+		uint8_t next = json[(*offset)++];
+		if ((next & 0xc0) != 0x80) {
+			return -EINVAL;
+		}
+		value = (value << 6) | (next & 0x3f);
+	}
+	if (value < minimum || value > 0x10ffff ||
+	    (value >= 0xd800 && value <= 0xdfff)) {
+		return -EINVAL;
+	}
+	*codepoint = value;
+	return 0;
+}
+
+static int escaped_codepoint(const uint8_t *json, size_t end, size_t *offset,
+			     uint32_t *codepoint)
+{
+	if (*offset >= end || json[(*offset)++] != '\\' || *offset >= end) {
+		return -EINVAL;
+	}
+	uint8_t escape = json[(*offset)++];
+	switch (escape) {
+	case '"':
+	case '\\':
+	case '/':
+		*codepoint = escape;
+		return 0;
+	case 'b':
+		*codepoint = '\b';
+		return 0;
+	case 'f':
+		*codepoint = '\f';
+		return 0;
+	case 'n':
+		*codepoint = '\n';
+		return 0;
+	case 'r':
+		*codepoint = '\r';
+		return 0;
+	case 't':
+		*codepoint = '\t';
+		return 0;
+	case 'u':
+		break;
+	default:
+		return -EINVAL;
+	}
+	if (*offset + 4 > end) {
+		return -EINVAL;
+	}
+	uint32_t value = 0;
+	for (size_t index = 0; index < 4; ++index) {
+		int digit = hex_digit(json[(*offset)++]);
+		if (digit < 0) {
+			return -EINVAL;
+		}
+		value = (value << 4) | (uint32_t)digit;
+	}
+	if (value >= 0xd800 && value <= 0xdbff) {
+		if (*offset + 6 > end || json[*offset] != '\\' ||
+		    json[*offset + 1] != 'u') {
+			return -EINVAL;
+		}
+		*offset += 2;
+		uint32_t low = 0;
+		for (size_t index = 0; index < 4; ++index) {
+			int digit = hex_digit(json[(*offset)++]);
+			if (digit < 0) {
+				return -EINVAL;
+			}
+			low = (low << 4) | (uint32_t)digit;
+		}
+		if (low < 0xdc00 || low > 0xdfff) {
+			return -EINVAL;
+		}
+		value = 0x10000 + ((value - 0xd800) << 10) + (low - 0xdc00);
+	} else if (value >= 0xdc00 && value <= 0xdfff) {
+		return -EINVAL;
+	}
+	*codepoint = value;
+	return 0;
+}
+
+static int next_string_codepoint(const uint8_t *json, size_t end,
+				 size_t *offset, uint32_t *codepoint)
+{
+	if (*offset >= end) {
+		return 1;
+	}
+	return json[*offset] == '\\' ?
+		       escaped_codepoint(json, end, offset, codepoint) :
+		       utf8_codepoint(json, end, offset, codepoint);
+}
+
+static bool decoded_string_equals_ascii(const uint8_t *json, size_t start,
+					size_t string_length,
+					const char *expected)
+{
+	size_t offset = start;
+	size_t end = start + string_length;
+	size_t expected_offset = 0;
+	while (offset < end && expected[expected_offset] != '\0') {
+		uint32_t codepoint;
+		if (next_string_codepoint(json, end, &offset, &codepoint) != 0 ||
+		    codepoint != (uint8_t)expected[expected_offset++]) {
+			return false;
+		}
+	}
+	return offset == end && expected[expected_offset] == '\0';
+}
+
+static int decode_ascii_string(const uint8_t *json, size_t start,
+			       size_t string_length, char *target,
+			       size_t capacity)
+{
+	size_t offset = start;
+	size_t end = start + string_length;
+	size_t written = 0;
+	while (offset < end) {
+		uint32_t codepoint;
+		if (next_string_codepoint(json, end, &offset, &codepoint) != 0 ||
+		    codepoint > 0x7f || written + 1 >= capacity) {
+			return -EINVAL;
+		}
+		target[written++] = (char)codepoint;
+	}
+	target[written] = '\0';
+	return 0;
+}
+
 static int string_bounds(const uint8_t *json, size_t length, size_t *offset,
 			 size_t *start, size_t *string_length)
 {
@@ -231,7 +408,16 @@ static int string_bounds(const uint8_t *json, size_t length, size_t *offset,
 			escaped = true;
 		} else if (character == '"') {
 			*string_length = *offset - *start - 1;
-			return 0;
+			size_t decoded_offset = *start;
+			size_t end = *start + *string_length;
+			uint32_t codepoint;
+			while (decoded_offset < end) {
+				if (next_string_codepoint(json, end, &decoded_offset,
+							  &codepoint) != 0) {
+					return -EINVAL;
+				}
+			}
+			return decoded_offset == end ? 0 : -EINVAL;
 		}
 	}
 	return -EINVAL;
@@ -307,17 +493,15 @@ static int extract_top_level_type(const uint8_t *json, size_t length,
 			return -EINVAL;
 		}
 		skip_whitespace(json, length, &offset);
-		if (key_length == 4 &&
-		    memcmp(&json[key_start], "type", key_length) == 0) {
+		if (decoded_string_equals_ascii(json, key_start, key_length, "type")) {
 			size_t value_start;
 			size_t value_length;
 			if (string_bounds(json, length, &offset, &value_start,
 					  &value_length) != 0 ||
-			    value_length + 1 > capacity) {
+			    decode_ascii_string(json, value_start, value_length, type,
+						capacity) != 0) {
 				return -EINVAL;
 			}
-			memcpy(type, &json[value_start], value_length);
-			type[value_length] = '\0';
 			return 0;
 		}
 		if (skip_value(json, length, &offset) != 0) {
@@ -334,6 +518,7 @@ static int extract_top_level_type(const uint8_t *json, size_t length,
 struct key_slice {
 	size_t start;
 	size_t length;
+	uint16_t scope;
 };
 
 /*
@@ -341,8 +526,31 @@ struct key_slice {
  * bound from the logical-message ceiling covers every object that can fit, so
  * duplicate detection adds no independent member-count limit.
  */
-static struct key_slice
-	object_keys[MAX_JSON_DEPTH][MAX_JSON_OBJECT_MEMBERS];
+static struct key_slice object_keys[MAX_JSON_OBJECT_MEMBERS];
+static size_t object_key_count;
+static uint16_t next_object_scope;
+
+static bool decoded_keys_equal(const uint8_t *json,
+			       const struct key_slice *left, size_t right_start,
+			       size_t right_length)
+{
+	size_t left_offset = left->start;
+	size_t left_end = left->start + left->length;
+	size_t right_offset = right_start;
+	size_t right_end = right_start + right_length;
+	while (left_offset < left_end && right_offset < right_end) {
+		uint32_t left_codepoint;
+		uint32_t right_codepoint;
+		if (next_string_codepoint(json, left_end, &left_offset,
+					  &left_codepoint) != 0 ||
+		    next_string_codepoint(json, right_end, &right_offset,
+					  &right_codepoint) != 0 ||
+		    left_codepoint != right_codepoint) {
+			return false;
+		}
+	}
+	return left_offset == left_end && right_offset == right_end;
+}
 
 static int validate_json_value(const uint8_t *json, size_t length,
 			       size_t *offset, size_t depth);
@@ -350,10 +558,10 @@ static int validate_json_value(const uint8_t *json, size_t length,
 static int validate_json_object(const uint8_t *json, size_t length,
 				size_t *offset, size_t depth)
 {
-	if (depth >= ARRAY_SIZE(object_keys) || json[(*offset)++] != '{') {
+	if (depth >= MAX_JSON_DEPTH || json[(*offset)++] != '{') {
 		return -EINVAL;
 	}
-	size_t key_count = 0;
+	uint16_t scope = next_object_scope++;
 	skip_whitespace(json, length, offset);
 	if (*offset < length && json[*offset] == '}') {
 		(*offset)++;
@@ -362,19 +570,22 @@ static int validate_json_object(const uint8_t *json, size_t length,
 	while (*offset < length) {
 		size_t key_start;
 		size_t key_length;
-		if (key_count >= ARRAY_SIZE(object_keys[depth]) ||
+		if (object_key_count >= ARRAY_SIZE(object_keys) ||
 		    string_bounds(json, length, offset, &key_start, &key_length) != 0) {
 			return -EINVAL;
 		}
-		for (size_t index = 0; index < key_count; ++index) {
-			if (object_keys[depth][index].length == key_length &&
-			    memcmp(&json[object_keys[depth][index].start],
-				   &json[key_start], key_length) == 0) {
+		for (size_t index = 0; index < object_key_count; ++index) {
+			if (object_keys[index].scope == scope &&
+			    decoded_keys_equal(json, &object_keys[index], key_start,
+					       key_length)) {
 				return -EEXIST;
 			}
 		}
-		object_keys[depth][key_count++] =
-			(struct key_slice){.start = key_start, .length = key_length};
+		object_keys[object_key_count++] = (struct key_slice){
+			.start = key_start,
+			.length = key_length,
+			.scope = scope,
+		};
 		skip_whitespace(json, length, offset);
 		if (*offset >= length || json[(*offset)++] != ':') {
 			return -EINVAL;
@@ -432,7 +643,7 @@ static int validate_json_array(const uint8_t *json, size_t length,
 static int validate_json_value(const uint8_t *json, size_t length,
 			       size_t *offset, size_t depth)
 {
-	if (depth >= ARRAY_SIZE(object_keys)) {
+	if (depth >= MAX_JSON_DEPTH) {
 		return -EINVAL;
 	}
 	skip_whitespace(json, length, offset);
@@ -450,17 +661,45 @@ static int validate_json_value(const uint8_t *json, size_t length,
 		size_t value_length;
 		return string_bounds(json, length, offset, &start, &value_length);
 	}
-	size_t start = *offset;
-	while (*offset < length && json[*offset] != ',' && json[*offset] != '}' &&
-	       json[*offset] != ']') {
+	if (length - *offset >= 4 && memcmp(&json[*offset], "true", 4) == 0) {
+		*offset += 4;
+		return 0;
+	}
+	if (length - *offset >= 5 && memcmp(&json[*offset], "false", 5) == 0) {
+		*offset += 5;
+		return 0;
+	}
+	if (length - *offset >= 4 && memcmp(&json[*offset], "null", 4) == 0) {
+		*offset += 4;
+		return 0;
+	}
+	if (json[*offset] < '0' || json[*offset] > '9') {
+		return -EINVAL;
+	}
+	if (json[*offset] == '0') {
+		(*offset)++;
+		if (*offset < length && json[*offset] >= '0' && json[*offset] <= '9') {
+			return -EINVAL;
+		}
+		return 0;
+	}
+	uint64_t value = 0;
+	while (*offset < length && json[*offset] >= '0' && json[*offset] <= '9') {
+		uint8_t digit = json[*offset] - '0';
+		if (value > (UINT64_MAX - digit) / 10U) {
+			return -EINVAL;
+		}
+		value = value * 10U + digit;
 		(*offset)++;
 	}
-	return *offset == start ? -EINVAL : 0;
+	return 0;
 }
 
 static int validate_no_duplicate_members(const uint8_t *json, size_t length)
 {
 	size_t offset = 0;
+	object_key_count = 0;
+	next_object_scope = 0;
 	int result = validate_json_value(json, length, &offset, 0);
 	skip_whitespace(json, length, &offset);
 	return result == 0 && offset == length ? 0 : -EINVAL;

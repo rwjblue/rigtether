@@ -36,18 +36,20 @@ int rt_monotonic_init(void)
 uint64_t rt_monotonic_us(void)
 {
 	/*
-	 * Read high/counter/high so a wrap interrupt cannot manufacture time moving
-	 * backward. The timer clears only at UINT32_MAX and is never a BLE/USB clock.
+	 * Synchronize with the wrap ISR and account for a compare event that became
+	 * pending before the ISR could advance the software epoch. If the event
+	 * arrived after capture, low is still in the upper half and belongs to the
+	 * old epoch; otherwise the cleared counter belongs to the next epoch.
 	 */
-	uint32_t high_before;
-	uint32_t high_after;
-	uint32_t low;
+	unsigned int irq_key = irq_lock();
+	uint32_t high = (uint32_t)atomic_get(&timer_high);
+	uint32_t low = nrfx_timer_capture(&lease_timer, NRF_TIMER_CC_CHANNEL1);
+	bool wrap_pending =
+		nrf_timer_event_check(lease_timer.p_reg, NRF_TIMER_EVENT_COMPARE0);
+	if (wrap_pending && low < (UINT32_MAX / 2U)) {
+		high++;
+	}
+	irq_unlock(irq_key);
 
-	do {
-		high_before = (uint32_t)atomic_get(&timer_high);
-		low = nrfx_timer_capture(&lease_timer, NRF_TIMER_CC_CHANNEL1);
-		high_after = (uint32_t)atomic_get(&timer_high);
-	} while (high_before != high_after);
-
-	return ((uint64_t)high_after << 32) | low;
+	return ((uint64_t)high << 32) | low;
 }

@@ -156,6 +156,8 @@ for protocol_boundary in (
     "#define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)",
     'render_error("wrong_session", "none"',
     '\\"code\\":\\"session_exhausted\\"',
+    "decoded_keys_equal(json, &object_keys[index]",
+    "#define MAX_JSON_DEPTH MAX_LOGICAL_BYTES",
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
@@ -166,6 +168,15 @@ if "object_keys[8][24]" in protocol_source:
     error("strict JSON duplicate detection must not impose a 24-member limit")
 if 'observed_tx = "null"' not in ble_source:
     error("nRF status must not infer radio transmit state from sensed PTT")
+
+monotonic_source = (ROOT / "firmware/nrf5340/src/monotonic.c").read_text(
+    encoding="utf-8"
+)
+if (
+    "nrf_timer_event_check" not in monotonic_source
+    or "wrap_pending" not in monotonic_source
+):
+    error("monotonic timer read must account for a pending wrap interrupt")
 
 radio_source = (ROOT / "firmware/nrf5340/src/radio_service.c").read_text(
     encoding="utf-8"
@@ -215,6 +226,8 @@ for ble_boundary in (
 audio_source = (ROOT / "firmware/nrf5340/src/audio_service.c").read_text(
     encoding="utf-8"
 )
+if "(int32_t)mono[index] << 8" in audio_source:
+    error("nRF playback conversion must not left-shift negative signed PCM")
 if "-((-sample + 128) >> 8)" not in audio_source:
     error("nRF capture conversion must round negative samples without a one-LSB bias")
 

@@ -52,7 +52,7 @@ void rt_audio_get_health(struct rt_audio_health *health)
 void rt_audio_playback_convert(const int16_t *mono, int32_t *stereo, size_t samples)
 {
 	for (size_t index = 0; index < samples; ++index) {
-		int32_t widened = (int32_t)mono[index] << 8;
+		int32_t widened = (int32_t)mono[index] * 256;
 		stereo[index * 2] = widened;
 		stereo[index * 2 + 1] = widened;
 	}
