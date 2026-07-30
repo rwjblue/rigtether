@@ -242,6 +242,7 @@ impl Model {
                 self.next_seq = 1;
                 self.cache.clear();
                 self.seq_to_op.clear();
+                self.expired_lease_ids.clear();
                 self.intent_id = None;
                 self.host_route = "unknown".to_owned();
                 self.protocol_session = "active".to_owned();
@@ -267,6 +268,7 @@ impl Model {
                 self.next_seq = 1;
                 self.cache.clear();
                 self.seq_to_op.clear();
+                self.expired_lease_ids.clear();
                 self.refresh_rearm();
             }
             "profile_validated" => {
@@ -690,6 +692,7 @@ impl Model {
         self.next_seq = 1;
         self.cache.clear();
         self.seq_to_op.clear();
+        self.expired_lease_ids.clear();
         self.intent_id = None;
         self.protocol_session = "active".to_owned();
         self.host_route = "unknown".to_owned();
@@ -987,6 +990,7 @@ impl Model {
         self.next_seq = 1;
         self.cache.clear();
         self.seq_to_op.clear();
+        self.expired_lease_ids.clear();
         self.start_client_nonce = None;
         self.start_op_id = None;
         self.start_bytes = None;
@@ -1298,7 +1302,7 @@ impl Model {
             }
             "inhibit" => {
                 self.inhibit = value;
-                if self.inhibit == "open" && self.safety_state == "tx_active" {
+                if self.inhibit != "closed" && self.safety_state == "tx_active" {
                     self.release("inhibit_open", true);
                 }
             }
@@ -1316,7 +1320,7 @@ impl Model {
 
     fn sense(&mut self, value: &str) {
         self.ptt_out = value.to_owned();
-        if self.commanded == "active" && self.ptt_out == "inactive" {
+        if self.commanded == "active" && self.ptt_out != "active" {
             self.lockout("output_failed_to_assert");
         } else if self.commanded == "inactive" && self.ptt_out == "active" {
             self.lockout("output_stuck_active");

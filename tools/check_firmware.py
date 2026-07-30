@@ -150,6 +150,7 @@ for protocol_boundary in (
     'strcmp(type, "radio_operating_state_read")',
     'strcmp(type, "radio_mode_read")',
     'strcmp(type, "radio_tx_state_read")',
+    'strcmp(type, "RX")',
     '\\"status_seq\\":%llu',
     "rt_radio_execute_typed(&request, &outcome)",
     "rt_safety_intent_begin(",

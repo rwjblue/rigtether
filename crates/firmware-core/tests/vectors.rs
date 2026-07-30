@@ -456,6 +456,120 @@ fn explicitly_released_lease_is_not_reported_expired() {
 }
 
 #[test]
+fn expired_lease_history_is_session_scoped() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    for (op_id, seq, command) in [
+        (
+            "00000000000000000000000000000001",
+            1,
+            serde_json::json!({
+                "type": "ptt_intent_begin",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }),
+        ),
+        (
+            "00000000000000000000000000000002",
+            2,
+            serde_json::json!({
+                "type": "ptt_acquire",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "requested_ms": 500
+            }),
+        ),
+    ] {
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": op_id,
+                "seq": seq,
+                "command": command
+            }))
+            .expect("request");
+    }
+    model
+        .event(&serde_json::json!({"action": "advance", "ms": 500}))
+        .expect("lease expiry");
+    model
+        .event(&serde_json::json!({"action": "new_session"}))
+        .expect("replacement session");
+    model
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000003",
+            "seq": 1,
+            "command": {
+                "type": "ptt_renew",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "lease_id": "00000000000000000000000000000001",
+                "requested_ms": 500
+            }
+        }))
+        .expect("old lease renewal");
+    assert_eq!(
+        model.snapshot()["last_result"]["error"]["code"],
+        "lease_not_found"
+    );
+}
+
+#[test]
+fn unknown_inhibit_or_ptt_sense_releases_immediately() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    for (trigger, release, state) in [
+        (
+            serde_json::json!({
+                "action": "set_health",
+                "domain": "inhibit",
+                "value": "unknown"
+            }),
+            "inhibit_open",
+            "tx_active",
+        ),
+        (
+            serde_json::json!({"action": "sense", "value": "unknown"}),
+            "output_failed_to_assert",
+            "fault_lockout",
+        ),
+    ] {
+        let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+        for (op_id, seq, command) in [
+            (
+                "00000000000000000000000000000001",
+                1,
+                serde_json::json!({
+                    "type": "ptt_intent_begin",
+                    "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }),
+            ),
+            (
+                "00000000000000000000000000000002",
+                2,
+                serde_json::json!({
+                    "type": "ptt_acquire",
+                    "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "requested_ms": 500
+                }),
+            ),
+        ] {
+            model
+                .event(&serde_json::json!({
+                    "action": "request",
+                    "op_id": op_id,
+                    "seq": seq,
+                    "command": command
+                }))
+                .expect("request");
+        }
+        model.event(&trigger).expect("unsafe input transition");
+        assert_eq!(model.snapshot()["commanded"], "inactive");
+        assert_eq!(model.snapshot()["last_release_code"], release);
+        assert_eq!(model.snapshot()["safety_state"], state);
+    }
+}
+
+#[test]
 fn raw_request_requires_exact_version_and_known_envelope() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");

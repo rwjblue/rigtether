@@ -1311,6 +1311,7 @@ static void command_result(const char *type, char *json, size_t json_length,
 	} else if (strcmp(type, "radio_tx_state_read") == 0) {
 		typed_radio_result(RT_RADIO_READ_TX_STATE, 0, body, capacity);
 	} else if (strcmp(type, "raw_cat") == 0 || strcmp(type, "TX") == 0 ||
+		   strcmp(type, "RX") == 0 ||
 		   strcmp(type, "SWT") == 0 || strcmp(type, "SWH") == 0 ||
 		   strcmp(type, "KY") == 0 || strstr(type, "key") != NULL ||
 		   strstr(type, "tune") != NULL || strstr(type, "xmit") != NULL ||
