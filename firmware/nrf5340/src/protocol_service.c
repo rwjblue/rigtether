@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <errno.h>
+#include <stdint.h>
 #include <string.h>
 #include <zephyr/data/json.h>
 #include <zephyr/kernel.h>
@@ -922,8 +923,10 @@ static int handle_session_start(char *json, size_t json_length,
 	snapshot.inputs.radio_profile = RT_HEALTH_UNHEALTHY;
 	rt_safety_update_inputs(&snapshot.inputs);
 	uint16_t device_limit = rt_ble_command_value_limit();
+	uint16_t client_frame_limit = (uint16_t)MIN(
+		message.client_rx_frame_limit, (uint64_t)UINT16_MAX);
 	uint16_t tx_limit =
-		rt_ble_set_response_frame_limit(message.client_rx_frame_limit);
+		rt_ble_set_response_frame_limit(client_frame_limit);
 	int length = snprintk(
 		rendered, sizeof(rendered),
 		"{\"ok\":true,\"result\":{\"type\":\"session_started\","

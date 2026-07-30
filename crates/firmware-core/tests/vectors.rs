@@ -397,6 +397,86 @@ fn ptt_release_requires_lease_and_reason_fields() {
 }
 
 #[test]
+fn ptt_acquire_validates_arguments_before_safety_state() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let invalid_commands = [
+        serde_json::json!({
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }),
+        serde_json::json!({
+            "type": "ptt_acquire",
+            "intent_id": "not-a-valid-identity",
+            "requested_ms": 500
+        }),
+        serde_json::json!({
+            "type": "ptt_acquire",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "requested_ms": "500"
+        }),
+    ];
+    for command in invalid_commands {
+        let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": "00000000000000000000000000000001",
+                "seq": 1,
+                "command": command
+            }))
+            .expect("invalid acquire request");
+        assert_eq!(
+            model.snapshot()["last_result"]["error"]["code"],
+            "invalid_argument"
+        );
+    }
+
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    for (op_id, seq, command) in [
+        (
+            "00000000000000000000000000000001",
+            1,
+            serde_json::json!({
+                "type": "ptt_intent_begin",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }),
+        ),
+        (
+            "00000000000000000000000000000002",
+            2,
+            serde_json::json!({
+                "type": "ptt_acquire",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "requested_ms": 500
+            }),
+        ),
+        (
+            "00000000000000000000000000000003",
+            3,
+            serde_json::json!({
+                "type": "ptt_acquire",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "requested_ms": 0
+            }),
+        ),
+    ] {
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": op_id,
+                "seq": seq,
+                "command": command
+            }))
+            .expect("request");
+    }
+    assert_eq!(
+        model.snapshot()["last_result"]["error"]["code"],
+        "invalid_argument"
+    );
+}
+
+#[test]
 fn explicitly_released_lease_is_not_reported_expired() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");

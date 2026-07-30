@@ -825,9 +825,19 @@ impl Model {
     }
 
     fn acquire(&mut self, command: &Map<String, Value>) -> Value {
-        if command.get("intent_id").and_then(Value::as_str) != self.intent_id.as_deref()
-            || self.intent_id.is_none()
-        {
+        let Some(intent_id) = command.get("intent_id").and_then(Value::as_str) else {
+            return error("invalid_argument", "none", false);
+        };
+        if !is_hex_id(intent_id) {
+            return error("invalid_argument", "none", false);
+        }
+        let Some(requested) = command.get("requested_ms").and_then(Value::as_u64) else {
+            return error("invalid_argument", "none", false);
+        };
+        if !(1..=T_LEASE_MAX_MS).contains(&requested) {
+            return error("invalid_argument", "none", false);
+        }
+        if Some(intent_id) != self.intent_id.as_deref() {
             return error("intent_required", "none", false);
         }
         if self.lease_id.is_some() {
@@ -835,12 +845,6 @@ impl Model {
         }
         if let Some(denied) = self.precondition_error() {
             return error(denied, "none", false);
-        }
-        let Some(requested) = command.get("requested_ms").and_then(Value::as_u64) else {
-            return error("invalid_argument", "none", false);
-        };
-        if !(1..=T_LEASE_MAX_MS).contains(&requested) {
-            return error("invalid_argument", "none", false);
         }
         self.lease_id = Some(self.new_lease_id());
         self.lease_deadline_ms = Some(self.now_ms + requested);

@@ -170,6 +170,7 @@ for protocol_boundary in (
     "release_command_descr",
     "nullable_lease_id(&command.lease_id)",
     'strcmp(command.reason, "operator_release")',
+    "message.client_rx_frame_limit, (uint64_t)UINT16_MAX",
     "rt_safety_release(RT_RELEASE_RADIO_CONTROL, true)",
     'command_error_with_io(body, capacity, code, "lockout", true)',
 ):
@@ -265,7 +266,8 @@ for safety_health_boundary in (
     "inputs->host_route != RT_HEALTH_HEALTHY",
     "RT_RELEASE_HOST_ROUTE",
     "state.inputs.inhibit_known && state.inputs.inhibit_closed",
-    "!inputs->ptt_out_known || !inputs->ptt_out_active",
+    "!inputs->ptt_out_known ||",
+    "!inputs->ptt_out_active &&",
     "state.state = RT_TX_ACTIVE",
     "state.lease_deadline_ms = accepted_at_ms + requested_ms",
     "state.continuous_started_ms = accepted_at_ms",
@@ -274,6 +276,9 @@ for safety_health_boundary in (
     "static char expired_lease_ids[MAX_SESSION_OPERATIONS][33]",
     "lease_expired_locked(lease_id)",
     "clear_expired_leases_locked()",
+    "#define ASSERTION_CHECK_MS (RELEASE_MAX_MS - SAFETY_PERIOD_MS)",
+    "now >= assertion_deadline_ms",
+    "rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true)",
 ):
     if safety_health_boundary not in safety_source:
         error(f"safety health-loss boundary is missing: {safety_health_boundary}")
