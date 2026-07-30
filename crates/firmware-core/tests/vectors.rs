@@ -478,6 +478,100 @@ fn ptt_acquire_validates_arguments_before_safety_state() {
 }
 
 #[test]
+fn ptt_renew_validates_arguments_before_lease_lookup() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    for command in [
+        serde_json::json!({
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001"
+        }),
+        serde_json::json!({
+            "type": "ptt_renew",
+            "intent_id": "not-an-identity",
+            "lease_id": "00000000000000000000000000000001",
+            "requested_ms": 500
+        }),
+        serde_json::json!({
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "not-a-lease",
+            "requested_ms": 500
+        }),
+        serde_json::json!({
+            "type": "ptt_renew",
+            "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lease_id": "00000000000000000000000000000001",
+            "requested_ms": 0
+        }),
+    ] {
+        let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": "00000000000000000000000000000001",
+                "seq": 1,
+                "command": command
+            }))
+            .expect("invalid renew request");
+        assert_eq!(
+            model.snapshot()["last_result"]["error"]["code"],
+            "invalid_argument"
+        );
+    }
+
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    for (op_id, seq, command) in [
+        (
+            "00000000000000000000000000000001",
+            1,
+            serde_json::json!({
+                "type": "ptt_intent_begin",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }),
+        ),
+        (
+            "00000000000000000000000000000002",
+            2,
+            serde_json::json!({
+                "type": "ptt_acquire",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "requested_ms": 500
+            }),
+        ),
+    ] {
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": op_id,
+                "seq": seq,
+                "command": command
+            }))
+            .expect("request");
+    }
+    model
+        .event(&serde_json::json!({"action": "advance", "ms": 500}))
+        .expect("lease expiry");
+    model
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000003",
+            "seq": 3,
+            "command": {
+                "type": "ptt_renew",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "lease_id": "00000000000000000000000000000001"
+            }
+        }))
+        .expect("malformed expired-lease renewal");
+    assert_eq!(
+        model.snapshot()["last_result"]["error"]["code"],
+        "invalid_argument"
+    );
+}
+
+#[test]
 fn explicitly_released_lease_is_not_reported_expired() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");

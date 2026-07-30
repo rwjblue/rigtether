@@ -31,6 +31,8 @@ static char expired_lease_ids[MAX_SESSION_OPERATIONS][33];
 static size_t expired_lease_count;
 static bool assertion_pending;
 static uint64_t assertion_deadline_ms;
+static bool deassertion_pending;
+static uint64_t deassertion_started_ms;
 static bool capped_intent_present;
 static char capped_intent_id[33];
 
@@ -54,6 +56,10 @@ static void ptt_output_inactive(void)
 	 * assertion path. A future radio-disconnected overlay must keep this function
 	 * as the sole writer and preserve passive inactive bias.
 	 */
+	if (state.commanded_ptt && !deassertion_pending) {
+		deassertion_pending = true;
+		deassertion_started_ms = rt_monotonic_ms();
+	}
 	state.commanded_ptt = false;
 	assertion_pending = false;
 	assertion_deadline_ms = 0;
@@ -69,6 +75,8 @@ static bool ptt_output_active(void)
 	if (!IS_ENABLED(CONFIG_RIGTETHER_PTT_OUTPUT_ENABLED)) {
 		return false;
 	}
+	deassertion_pending = false;
+	deassertion_started_ms = 0;
 	state.commanded_ptt = true;
 	return true;
 }
@@ -263,6 +271,14 @@ void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 	    inputs->ptt_out_active) {
 		assertion_pending = false;
 		assertion_deadline_ms = 0;
+	} else if (!state.commanded_ptt && inputs->ptt_out_known &&
+		   !inputs->ptt_out_active) {
+		deassertion_pending = false;
+		deassertion_started_ms = 0;
+	} else if (!state.commanded_ptt && inputs->ptt_out_known &&
+		   inputs->ptt_out_active && !deassertion_pending) {
+		deassertion_pending = true;
+		deassertion_started_ms = now;
 	}
 	release_audio = state.commanded_ptt &&
 			inputs->device_audio != RT_HEALTH_HEALTHY;
@@ -589,9 +605,11 @@ bool rt_safety_complete_check_and_feed_watchdog(void)
 		}
 	}
 
-	if (!state.commanded_ptt && state.inputs.ptt_out_known &&
-	    state.inputs.ptt_out_active &&
-	    now - state.last_release_at_ms >= RELEASE_MAX_MS) {
+	if (!state.commanded_ptt && deassertion_pending &&
+	    state.inputs.ptt_out_known && state.inputs.ptt_out_active &&
+	    now - deassertion_started_ms >= RELEASE_MAX_MS) {
+		deassertion_pending = false;
+		deassertion_started_ms = 0;
 		k_mutex_unlock(&safety_lock);
 		rt_safety_release(RT_RELEASE_OUTPUT_STUCK_ACTIVE, true);
 		return false;
@@ -657,6 +675,8 @@ int rt_safety_init(void)
 		.last_release_at_ms = 0,
 	};
 	expired_lease_count = 0;
+	deassertion_pending = false;
+	deassertion_started_ms = 0;
 	capped_intent_present = false;
 	capped_intent_id[0] = '\0';
 	ptt_output_inactive();

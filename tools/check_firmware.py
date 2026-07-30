@@ -284,6 +284,8 @@ for safety_health_boundary in (
     "#define ASSERTION_CHECK_MS (RELEASE_MAX_MS - SAFETY_PERIOD_MS)",
     "now >= assertion_deadline_ms",
     "rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true)",
+    "static bool deassertion_pending",
+    "now - deassertion_started_ms >= RELEASE_MAX_MS",
     "static bool capped_intent_present",
     "strcmp(capped_intent_id, intent_id) == 0",
     "release_inhibit && inputs->ptt_out_known",

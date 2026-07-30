@@ -861,13 +861,27 @@ impl Model {
     }
 
     fn renew(&mut self, command: &Map<String, Value>) -> Value {
-        let requested_lease = command.get("lease_id").and_then(Value::as_str);
-        if requested_lease.is_some_and(|id| self.expired_lease_ids.contains(id)) {
+        let Some(requested_intent) = command.get("intent_id").and_then(Value::as_str) else {
+            return error("invalid_argument", "none", false);
+        };
+        let Some(requested_lease) = command.get("lease_id").and_then(Value::as_str) else {
+            return error("invalid_argument", "none", false);
+        };
+        let Some(requested) = command.get("requested_ms").and_then(Value::as_u64) else {
+            return error("invalid_argument", "none", false);
+        };
+        if !is_hex_id(requested_intent)
+            || !is_hex_id(requested_lease)
+            || !(1..=T_LEASE_MAX_MS).contains(&requested)
+        {
+            return error("invalid_argument", "none", false);
+        }
+        if self.expired_lease_ids.contains(requested_lease) {
             return error("lease_expired", "none", false);
         }
         if self.safety_state != "tx_active"
-            || requested_lease != self.lease_id.as_deref()
-            || command.get("intent_id").and_then(Value::as_str) != self.intent_id.as_deref()
+            || Some(requested_lease) != self.lease_id.as_deref()
+            || Some(requested_intent) != self.intent_id.as_deref()
         {
             return error("lease_not_found", "none", false);
         }
@@ -891,12 +905,6 @@ impl Model {
         if let Some(code) = denied {
             self.release(code, true);
             return error(code, "release", false);
-        }
-        let Some(requested) = command.get("requested_ms").and_then(Value::as_u64) else {
-            return error("invalid_argument", "none", false);
-        };
-        if !(1..=T_LEASE_MAX_MS).contains(&requested) {
-            return error("invalid_argument", "none", false);
         }
         self.lease_deadline_ms = Some(self.now_ms + requested);
         ok(json!({
