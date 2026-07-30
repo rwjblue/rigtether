@@ -166,6 +166,11 @@ for protocol_boundary in (
     "static char command_json[MAX_LOGICAL_BYTES]",
     "static char json[MAX_LOGICAL_BYTES + 1]",
     "!valid_id(message.boot_id)",
+    "release_command_descr",
+    "nullable_lease_id(&command.lease_id)",
+    'strcmp(command.reason, "operator_release")',
+    "rt_safety_release(RT_RELEASE_RADIO_CONTROL, true)",
+    'command_error_with_io(body, capacity, code, "lockout", true)',
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
@@ -193,6 +198,19 @@ if 'radio\\":{\\"profile\\":\\"%s\\"' not in ble_source:
     error("nRF status must report the selected radio profile")
 if "validate_json_value(" in protocol_source:
     error("strict JSON validation must remain iterative on the bounded BLE thread")
+for status_delivery_boundary in (
+    "struct status_transfer",
+    "bt_gatt_notify_cb(current_conn, &status_transfer.params)",
+    ".func = status_notified",
+    "status_transfer.in_flight",
+    "status_transfer.pending_logical",
+    "schedule_status_fragment_locked(K_MSEC(5))",
+):
+    if status_delivery_boundary not in ble_source:
+        error(
+            "fragmented status delivery is not completion-driven: "
+            f"{status_delivery_boundary}"
+        )
 
 monotonic_source = (ROOT / "firmware/nrf5340/src/monotonic.c").read_text(
     encoding="utf-8"

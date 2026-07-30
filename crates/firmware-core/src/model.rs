@@ -912,6 +912,17 @@ impl Model {
 
     fn operator_release(&mut self, command: &Map<String, Value>) -> Value {
         let requested_intent = command.get("intent_id").and_then(Value::as_str);
+        let valid_lease = match command.get("lease_id") {
+            Some(Value::Null) => true,
+            Some(Value::String(lease_id)) => is_hex_id(lease_id),
+            _ => false,
+        };
+        if !requested_intent.is_some_and(is_hex_id)
+            || !valid_lease
+            || command.get("reason").and_then(Value::as_str) != Some("operator_release")
+        {
+            return error("invalid_argument", "none", false);
+        }
         if self.first_fault_code.as_deref() == Some("continuous_cap")
             && requested_intent == self.capped_intent_id.as_deref()
         {
@@ -986,6 +997,10 @@ impl Model {
         self.next_seq = 1;
         self.cache.clear();
         self.seq_to_op.clear();
+        self.start_client_nonce = None;
+        self.start_op_id = None;
+        self.start_bytes = None;
+        self.start_response = None;
         ok(json!({
             "type": "radio_profile_select",
             "profile": profile,

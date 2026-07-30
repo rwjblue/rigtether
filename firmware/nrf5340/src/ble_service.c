@@ -416,7 +416,27 @@ struct response_transfer {
 static struct response_transfer response_transfer;
 static uint32_t next_response_transfer_id = 1;
 
+struct status_transfer {
+	bool active;
+	bool in_flight;
+	bool pending;
+	uint32_t id;
+	uint32_t total;
+	uint32_t offset;
+	uint16_t pending_length;
+	uint8_t logical[MAX_MESSAGE_BYTES];
+	uint8_t pending_logical[MAX_MESSAGE_BYTES];
+	uint8_t frame[517];
+	struct bt_gatt_notify_params params;
+};
+
+static struct status_transfer status_transfer;
+
 static int send_next_response_fragment(void);
+static int send_next_status_fragment(void);
+static void status_retry_work_handler(struct k_work *work);
+
+K_WORK_DELAYABLE_DEFINE(status_retry_work, status_retry_work_handler);
 
 static void response_indicated(struct bt_conn *conn,
 			       struct bt_gatt_indicate_params *params, uint8_t err)
@@ -500,6 +520,106 @@ static int send_next_response_fragment(void)
 	return result;
 }
 
+static bool transient_notify_error(int error)
+{
+	return error == -ENOMEM || error == -EAGAIN || error == -EBUSY;
+}
+
+static void schedule_status_fragment_locked(k_timeout_t delay)
+{
+	(void)k_work_reschedule(&status_retry_work, delay);
+}
+
+static void status_notified(struct bt_conn *conn, void *user_data)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(user_data);
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	status_transfer.in_flight = false;
+	if (!status_transfer.active) {
+		k_mutex_unlock(&ble_lock);
+		return;
+	}
+	if (status_transfer.offset == status_transfer.total) {
+		if (status_transfer.pending) {
+			memcpy(status_transfer.logical,
+			       status_transfer.pending_logical,
+			       status_transfer.pending_length);
+			status_transfer.id = next_response_transfer_id++;
+			status_transfer.total = status_transfer.pending_length;
+			status_transfer.offset = 0;
+			status_transfer.pending = false;
+			status_transfer.pending_length = 0;
+		} else {
+			status_transfer.active = false;
+		}
+	}
+	if (status_transfer.active) {
+		schedule_status_fragment_locked(K_NO_WAIT);
+	}
+	k_mutex_unlock(&ble_lock);
+}
+
+static int send_next_status_fragment(void)
+{
+	uint16_t frame_limit =
+		MIN(MIN(command_value_limit, response_client_limit),
+		    sizeof(status_transfer.frame));
+	if (frame_limit <= FRAME_HEADER || current_conn == NULL) {
+		return -ENOTCONN;
+	}
+	if (!status_transfer.active || status_transfer.in_flight) {
+		return 0;
+	}
+	uint16_t payload_limit = frame_limit - FRAME_HEADER;
+	uint16_t payload =
+		MIN(payload_limit, status_transfer.total - status_transfer.offset);
+	uint8_t flags = status_transfer.offset == 0 ? START_FLAG : 0;
+	if (status_transfer.offset + payload == status_transfer.total) {
+		flags |= END_FLAG;
+	}
+	status_transfer.frame[0] = 0;
+	status_transfer.frame[1] = flags;
+	sys_put_be16(0, &status_transfer.frame[2]);
+	sys_put_be32(status_transfer.id, &status_transfer.frame[4]);
+	sys_put_be32(status_transfer.total, &status_transfer.frame[8]);
+	sys_put_be32(status_transfer.offset, &status_transfer.frame[12]);
+	memcpy(&status_transfer.frame[FRAME_HEADER],
+	       &status_transfer.logical[status_transfer.offset], payload);
+	status_transfer.params = (struct bt_gatt_notify_params){
+		.attr = &rt_service.attrs[9],
+		.data = status_transfer.frame,
+		.len = FRAME_HEADER + payload,
+		.func = status_notified,
+	};
+	int result = bt_gatt_notify_cb(current_conn, &status_transfer.params);
+	if (result == 0) {
+		status_transfer.in_flight = true;
+		status_transfer.offset += payload;
+	}
+	return result;
+}
+
+static void status_retry_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	if (!status_transfer.active) {
+		k_mutex_unlock(&ble_lock);
+		return;
+	}
+	int result = send_next_status_fragment();
+	if (transient_notify_error(result)) {
+		schedule_status_fragment_locked(K_MSEC(5));
+	} else if (result != 0) {
+		status_transfer.active = false;
+		status_transfer.in_flight = false;
+		status_transfer.pending = false;
+		status_transfer.pending_length = 0;
+	}
+	k_mutex_unlock(&ble_lock);
+}
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err != 0) {
@@ -527,6 +647,10 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	}
 	command_transfer.active = false;
 	response_transfer.active = false;
+	status_transfer.active = false;
+	status_transfer.in_flight = false;
+	status_transfer.pending = false;
+	status_transfer.pending_length = 0;
 	command_value_limit = 20;
 	response_client_limit = UINT16_MAX;
 	k_mutex_unlock(&ble_lock);
@@ -650,41 +774,32 @@ int rt_ble_publish_status(const uint8_t *value, uint16_t length)
 	if (length == 0 || length > MAX_MESSAGE_BYTES) {
 		return -EMSGSIZE;
 	}
-	uint8_t frame[517];
-	uint32_t transfer_id;
-	uint32_t sent = 0;
 	k_mutex_lock(&ble_lock, K_FOREVER);
-	transfer_id = next_response_transfer_id++;
 	if (current_conn == NULL) {
 		k_mutex_unlock(&ble_lock);
 		return -ENOTCONN;
 	}
-	uint16_t frame_limit =
-		MIN(MIN(command_value_limit, response_client_limit), sizeof(frame));
-	if (frame_limit <= FRAME_HEADER) {
+	if (status_transfer.active) {
+		memcpy(status_transfer.pending_logical, value, length);
+		status_transfer.pending_length = length;
+		status_transfer.pending = true;
 		k_mutex_unlock(&ble_lock);
-		return -EMSGSIZE;
+		return 0;
 	}
-	int result = 0;
-	while (sent < length) {
-		uint16_t payload = MIN(frame_limit - FRAME_HEADER, length - sent);
-		uint8_t flags = sent == 0 ? START_FLAG : 0;
-		if (sent + payload == length) {
-			flags |= END_FLAG;
-		}
-		frame[0] = 0;
-		frame[1] = flags;
-		sys_put_be16(0, &frame[2]);
-		sys_put_be32(transfer_id, &frame[4]);
-		sys_put_be32(length, &frame[8]);
-		sys_put_be32(sent, &frame[12]);
-		memcpy(&frame[FRAME_HEADER], &value[sent], payload);
-		result = bt_gatt_notify(current_conn, &rt_service.attrs[9], frame,
-					FRAME_HEADER + payload);
-		if (result != 0) {
-			break;
-		}
-		sent += payload;
+	status_transfer.active = true;
+	status_transfer.in_flight = false;
+	status_transfer.pending = false;
+	status_transfer.id = next_response_transfer_id++;
+	status_transfer.total = length;
+	status_transfer.offset = 0;
+	status_transfer.pending_length = 0;
+	memcpy(status_transfer.logical, value, length);
+	int result = send_next_status_fragment();
+	if (transient_notify_error(result)) {
+		schedule_status_fragment_locked(K_MSEC(5));
+		result = 0;
+	} else if (result != 0) {
+		status_transfer.active = false;
 	}
 	k_mutex_unlock(&ble_lock);
 	return result;

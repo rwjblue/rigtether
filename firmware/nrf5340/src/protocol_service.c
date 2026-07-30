@@ -59,6 +59,13 @@ struct intent_command {
 	char *intent_id;
 };
 
+struct release_command {
+	char *type;
+	char *intent_id;
+	struct json_obj_token lease_id;
+	char *reason;
+};
+
 struct lease_command {
 	char *type;
 	char *intent_id;
@@ -129,6 +136,13 @@ static const struct json_obj_descr health_command_descr[] = {
 static const struct json_obj_descr intent_command_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct intent_command, type, JSON_TOK_STRING),
 	JSON_OBJ_DESCR_PRIM(struct intent_command, intent_id, JSON_TOK_STRING),
+};
+
+static const struct json_obj_descr release_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct release_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct release_command, intent_id, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct release_command, lease_id, JSON_TOK_OPAQUE),
+	JSON_OBJ_DESCR_PRIM(struct release_command, reason, JSON_TOK_STRING),
 };
 
 static const struct json_obj_descr lease_command_descr[] = {
@@ -920,13 +934,19 @@ static int handle_session_start(char *json, size_t json_length,
 	return copy_response(rendered, response, response_capacity, response_length);
 }
 
-static void command_error(char *body, size_t capacity, const char *code,
-			  const char *effect)
+static void command_error_with_io(char *body, size_t capacity, const char *code,
+				  const char *effect, bool radio_io_attempted)
 {
 	snprintk(body, capacity,
 		 "\"ok\":false,\"error\":{\"code\":\"%s\","
-		 "\"safety_effect\":\"%s\",\"radio_io_attempted\":false}",
-		 code, effect);
+		 "\"safety_effect\":\"%s\",\"radio_io_attempted\":%s}",
+		 code, effect, radio_io_attempted ? "true" : "false");
+}
+
+static void command_error(char *body, size_t capacity, const char *code,
+			  const char *effect)
+{
+	command_error_with_io(body, capacity, code, effect, false);
 }
 
 static bool fault_id_value(const char *identity, uint32_t *value)
@@ -949,6 +969,24 @@ static bool fault_id_value(const char *identity, uint32_t *value)
 	return true;
 }
 
+static bool nullable_lease_id(const struct json_obj_token *token)
+{
+	if (token->start == NULL) {
+		return false;
+	}
+	if (token->length == 4 && memcmp(token->start, "null", 4) == 0) {
+		return true;
+	}
+	if (token->length != 34 || token->start[0] != '"' ||
+	    token->start[33] != '"') {
+		return false;
+	}
+	char identity[33];
+	memcpy(identity, &token->start[1], 32);
+	identity[32] = '\0';
+	return valid_id(identity);
+}
+
 static void typed_radio_result(enum rt_radio_operation operation,
 			       uint64_t frequency_hz, char *body,
 			       size_t capacity)
@@ -960,7 +998,20 @@ static void typed_radio_result(enum rt_radio_operation operation,
 	struct rt_radio_outcome outcome;
 	int err = rt_radio_execute_typed(&request, &outcome);
 	if (err != 0) {
-		command_error(body, capacity, outcome.error_code, "none");
+		const char *code = outcome.error_code == NULL ?
+					   "radio_control_fault" :
+					   outcome.error_code;
+		if (strcmp(code, "radio_control_fault") == 0) {
+			/* Release and latch first cause before any profile bookkeeping. */
+			rt_safety_release(RT_RELEASE_RADIO_CONTROL, true);
+			struct rt_safety_snapshot snapshot;
+			rt_safety_snapshot(&snapshot);
+			snapshot.inputs.radio_profile = RT_HEALTH_UNHEALTHY;
+			rt_safety_update_inputs(&snapshot.inputs);
+			command_error_with_io(body, capacity, code, "lockout", true);
+		} else {
+			command_error(body, capacity, code, "none");
+		}
 		return;
 	}
 	snprintk(body, capacity, "%s", outcome.result_json);
@@ -1147,13 +1198,16 @@ static void command_result(const char *type, char *json, size_t json_length,
 			}
 		}
 	} else if (strcmp(type, "ptt_release") == 0) {
-		struct intent_command command = {0};
+		struct release_command command = {0};
 		int64_t parsed = json_obj_parse(json, json_length,
-						intent_command_descr,
-						ARRAY_SIZE(intent_command_descr),
+						release_command_descr,
+						ARRAY_SIZE(release_command_descr),
 						&command);
-		if (parsed != BIT_MASK(ARRAY_SIZE(intent_command_descr)) ||
-		    !valid_id(command.intent_id)) {
+		if (parsed != BIT_MASK(ARRAY_SIZE(release_command_descr)) ||
+		    !valid_id(command.intent_id) ||
+		    !nullable_lease_id(&command.lease_id) ||
+		    command.reason == NULL ||
+		    strcmp(command.reason, "operator_release") != 0) {
 			command_error(body, capacity, "invalid_argument", "none");
 		} else if (!rt_safety_operator_release(command.intent_id)) {
 			command_error(body, capacity, "intent_required", "none");

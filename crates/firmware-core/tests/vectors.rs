@@ -312,6 +312,52 @@ fn disconnect_clears_cached_session_start() {
 }
 
 #[test]
+fn profile_selection_clears_cached_session_start() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, Some(&serde_json::json!({"session": false})))
+        .expect("pre-session initial state");
+    let start = br#"{"type":"session_start","boot_id":"11111111111111111111111111111111","client_nonce":"22222222222222222222222222222222","op_id":"33333333333333333333333333333333","select":{"major":0,"minor":0},"required_capabilities":["first_cause_fault_v0","independent_health_v0","ordered_operations","ptt_leases_v0","typed_radio_v0"],"client_rx_frame_limit":185,"client_max_message_bytes":4096}"#;
+    let first = model
+        .handle_logical(start)
+        .expect("first session negotiation");
+    let first_session = first["result"]["session_id"]
+        .as_str()
+        .expect("first session identity")
+        .to_owned();
+    let select = format!(
+        "{{\"type\":\"request\",\"v\":{{\"major\":0,\"minor\":0}},\"boot_id\":\"11111111111111111111111111111111\",\"session_id\":\"{first_session}\",\"op_id\":\"00000000000000000000000000000001\",\"seq\":1,\"command\":{{\"type\":\"radio_profile_select\",\"profile\":\"kx3\"}}}}"
+    );
+    let selected = model
+        .handle_logical(select.as_bytes())
+        .expect("profile selection response");
+    assert_eq!(selected["result"]["session_invalidated"], true);
+    assert_eq!(model.snapshot()["session_id"], Value::Null);
+
+    let replacement = model
+        .handle_logical(start)
+        .expect("replacement session negotiation");
+    let replacement_session = replacement["result"]["session_id"]
+        .as_str()
+        .expect("replacement session identity");
+    assert_ne!(replacement_session, first_session);
+    assert_eq!(model.snapshot()["session_id"], replacement_session);
+}
+
+#[test]
+fn ptt_release_requires_lease_and_reason_fields() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    let request = br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"ptt_release","intent_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#;
+    let denial = model
+        .handle_logical(request)
+        .expect("malformed release is a command denial");
+    assert_eq!(denial["error"]["code"], "invalid_argument");
+    assert_eq!(denial["error"]["safety_effect"], "none");
+}
+
+#[test]
 fn raw_request_requires_exact_version_and_known_envelope() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
