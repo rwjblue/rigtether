@@ -523,9 +523,12 @@ impl Model {
     }
 
     fn release(&mut self, code: &str, close_intent: bool) {
-        if let Some(lease_id) = self.lease_id.take() {
-            self.expired_lease_ids.insert(lease_id);
+        if code == "lease_expired" {
+            if let Some(lease_id) = self.lease_id.as_ref() {
+                self.expired_lease_ids.insert(lease_id.clone());
+            }
         }
+        self.lease_id = None;
         self.commanded = "inactive".to_owned();
         self.lease_deadline_ms = None;
         self.continuous_started_ms = None;
@@ -1072,18 +1075,21 @@ impl Model {
         event: &Map<String, Value>,
         exact_bytes: Option<&[u8]>,
     ) -> Result<(), String> {
-        if self.session_id.is_none() {
-            self.last_result = Some(error("wrong_session", "none", false));
-            return Ok(());
-        }
         let request_bytes = if let Some(bytes) = exact_bytes {
             bytes.to_vec()
         } else {
             match canonical_request(event, &self.boot_id, self.session_id.as_deref()) {
                 Ok(bytes) => bytes,
                 Err(_) => {
-                    self.lockout("protocol_fault");
-                    self.last_result = Some(error("malformed", "lockout", false));
+                    let active = self.session_id.is_some();
+                    if active {
+                        self.lockout("protocol_fault");
+                    }
+                    self.last_result = Some(error(
+                        "malformed",
+                        if active { "lockout" } else { "none" },
+                        false,
+                    ));
                     return Ok(());
                 }
             }
@@ -1108,8 +1114,15 @@ impl Model {
                 .and_then(Value::as_str)
                 .is_none_or(str::is_empty)
         {
-            self.lockout("protocol_fault");
-            self.last_result = Some(error("malformed", "lockout", false));
+            let active = self.session_id.is_some();
+            if active {
+                self.lockout("protocol_fault");
+            }
+            self.last_result = Some(error(
+                "malformed",
+                if active { "lockout" } else { "none" },
+                false,
+            ));
             return Ok(());
         }
         let op_id = op_id.expect("validated");

@@ -397,6 +397,65 @@ fn ptt_release_requires_lease_and_reason_fields() {
 }
 
 #[test]
+fn explicitly_released_lease_is_not_reported_expired() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    for (op_id, seq, command) in [
+        (
+            "00000000000000000000000000000001",
+            1,
+            serde_json::json!({
+                "type": "ptt_intent_begin",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }),
+        ),
+        (
+            "00000000000000000000000000000002",
+            2,
+            serde_json::json!({
+                "type": "ptt_acquire",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "requested_ms": 500
+            }),
+        ),
+        (
+            "00000000000000000000000000000003",
+            3,
+            serde_json::json!({
+                "type": "ptt_release",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "lease_id": "00000000000000000000000000000001",
+                "reason": "operator_release"
+            }),
+        ),
+        (
+            "00000000000000000000000000000004",
+            4,
+            serde_json::json!({
+                "type": "ptt_renew",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "lease_id": "00000000000000000000000000000001",
+                "requested_ms": 500
+            }),
+        ),
+    ] {
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": op_id,
+                "seq": seq,
+                "command": command
+            }))
+            .expect("request");
+    }
+    assert_eq!(
+        model.snapshot()["last_result"]["error"]["code"],
+        "lease_not_found"
+    );
+}
+
+#[test]
 fn raw_request_requires_exact_version_and_known_envelope() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
@@ -429,6 +488,13 @@ fn raw_request_requires_exact_version_and_known_envelope() {
         .expect("pre-session request is denied receive-safely");
     assert_eq!(denial["error"]["code"], "wrong_session");
     assert_eq!(denial["error"]["safety_effect"], "none");
+    assert_eq!(model.snapshot()["safety_state"], "receive_safe");
+
+    let malformed = model
+        .handle_logical(br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","seq":1,"command":{"type":"status_read"}}"#)
+        .expect("malformed pre-session request is denied before session lookup");
+    assert_eq!(malformed["error"]["code"], "malformed");
+    assert_eq!(malformed["error"]["safety_effect"], "none");
     assert_eq!(model.snapshot()["safety_state"], "receive_safe");
 }
 
