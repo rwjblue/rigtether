@@ -478,6 +478,60 @@ fn ptt_acquire_validates_arguments_before_safety_state() {
 }
 
 #[test]
+fn ptt_intent_validates_arguments_before_safety_state() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+
+    let mut active_intent = Model::from_initial(ids.clone(), None).expect("initial state");
+    active_intent
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000001",
+            "seq": 1,
+            "command": {
+                "type": "ptt_intent_begin",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+        }))
+        .expect("valid intent");
+    active_intent
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000002",
+            "seq": 2,
+            "command": {"type": "ptt_intent_begin"}
+        }))
+        .expect("malformed second intent");
+    assert_eq!(
+        active_intent.snapshot()["last_result"]["error"]["code"],
+        "invalid_argument"
+    );
+
+    let mut locked = Model::from_initial(ids, None).expect("initial state");
+    locked
+        .event(&serde_json::json!({
+            "action": "fault",
+            "code": "radio_control_fault"
+        }))
+        .expect("fault lockout");
+    locked
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000001",
+            "seq": 1,
+            "command": {
+                "type": "ptt_intent_begin",
+                "intent_id": "not-an-identity"
+            }
+        }))
+        .expect("malformed locked intent");
+    assert_eq!(
+        locked.snapshot()["last_result"]["error"]["code"],
+        "invalid_argument"
+    );
+}
+
+#[test]
 fn ptt_renew_validates_arguments_before_lease_lookup() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
@@ -569,6 +623,77 @@ fn ptt_renew_validates_arguments_before_lease_lookup() {
         model.snapshot()["last_result"]["error"]["code"],
         "invalid_argument"
     );
+}
+
+#[test]
+fn deassertion_deadline_survives_repeated_release_requests() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    for (op_id, seq, command) in [
+        (
+            "00000000000000000000000000000001",
+            1,
+            serde_json::json!({
+                "type": "ptt_intent_begin",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }),
+        ),
+        (
+            "00000000000000000000000000000002",
+            2,
+            serde_json::json!({
+                "type": "ptt_acquire",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "requested_ms": 500
+            }),
+        ),
+        (
+            "00000000000000000000000000000003",
+            3,
+            serde_json::json!({
+                "type": "ptt_release",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "lease_id": "00000000000000000000000000000001",
+                "reason": "operator_release"
+            }),
+        ),
+    ] {
+        model
+            .event(&serde_json::json!({
+                "action": "request",
+                "op_id": op_id,
+                "seq": seq,
+                "command": command
+            }))
+            .expect("request");
+    }
+    assert_eq!(model.snapshot()["deassertion_deadline_ms"], 100);
+    model
+        .event(&serde_json::json!({"action": "advance", "ms": 50}))
+        .expect("partial release interval");
+    model
+        .event(&serde_json::json!({
+            "action": "request",
+            "op_id": "00000000000000000000000000000004",
+            "seq": 4,
+            "command": {
+                "type": "ptt_release",
+                "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "lease_id": null,
+                "reason": "operator_release"
+            }
+        }))
+        .expect("repeated release");
+    assert_eq!(model.snapshot()["deassertion_deadline_ms"], 100);
+    model
+        .event(&serde_json::json!({"action": "advance", "ms": 49}))
+        .expect("before deadline");
+    assert_eq!(model.snapshot()["first_fault_code"], Value::Null);
+    model
+        .event(&serde_json::json!({"action": "advance", "ms": 1}))
+        .expect("release deadline");
+    assert_eq!(model.snapshot()["first_fault_code"], "output_stuck_active");
 }
 
 #[test]

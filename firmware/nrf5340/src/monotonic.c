@@ -20,7 +20,8 @@ static void timer_handler(nrf_timer_event_t event_type, void *context)
 
 int rt_monotonic_init(void)
 {
-	nrfx_timer_config_t config = NRFX_TIMER_DEFAULT_CONFIG(1000000);
+	nrfx_timer_config_t config =
+		NRFX_TIMER_DEFAULT_CONFIG(NRF_TIMER_FREQ_1MHz);
 	config.bit_width = NRF_TIMER_BIT_WIDTH_32;
 	int err = nrfx_timer_init(&lease_timer, &config, timer_handler);
 	if (err != NRFX_SUCCESS) {

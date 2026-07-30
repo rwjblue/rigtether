@@ -591,6 +591,7 @@ bool rt_safety_complete_check_and_feed_watchdog(void)
 		k_mutex_unlock(&safety_lock);
 		rt_safety_release(cause, cause == RT_RELEASE_CONTINUOUS_CAP);
 		k_mutex_lock(&safety_lock, K_FOREVER);
+		now = rt_monotonic_ms();
 	}
 
 	if (state.commanded_ptt && assertion_pending) {

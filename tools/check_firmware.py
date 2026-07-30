@@ -255,10 +255,12 @@ monotonic_source = (ROOT / "firmware/nrf5340/src/monotonic.c").read_text(
     encoding="utf-8"
 )
 if (
+    "NRFX_TIMER_DEFAULT_CONFIG(NRF_TIMER_FREQ_1MHz)" not in monotonic_source
+    or
     "nrf_timer_event_check" not in monotonic_source
     or "wrap_pending" not in monotonic_source
 ):
-    error("monotonic timer read must account for a pending wrap interrupt")
+    error("monotonic timer must use the 1 MHz enum and account for a pending wrap")
 
 radio_source = (ROOT / "firmware/nrf5340/src/radio_service.c").read_text(
     encoding="utf-8"
@@ -298,6 +300,7 @@ for safety_health_boundary in (
     "rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true)",
     "static bool deassertion_pending",
     "now - deassertion_started_ms >= RELEASE_MAX_MS",
+    "now = rt_monotonic_ms();",
     "static bool capped_intent_present",
     "strcmp(capped_intent_id, intent_id) == 0",
     "release_inhibit && inputs->ptt_out_known",

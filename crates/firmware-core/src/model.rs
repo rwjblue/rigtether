@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    MAX_SESSION_OPERATIONS, T_CONTINUOUS_MAX_MS, T_LEASE_MAX_MS, T_REARM_MIN_MS, strict_json,
+    MAX_SESSION_OPERATIONS, T_CONTINUOUS_MAX_MS, T_LEASE_MAX_MS, T_REARM_MIN_MS, T_RELEASE_MAX_MS,
+    strict_json,
 };
 
 const DEVICE_ID: &str = "00112233445566778899aabbccddeeff";
@@ -80,6 +81,7 @@ pub struct Model {
     expired_lease_ids: BTreeSet<String>,
     lease_deadline_ms: Option<u64>,
     continuous_started_ms: Option<u64>,
+    deassertion_deadline_ms: Option<u64>,
     first_fault_code: Option<String>,
     first_fault_id: Option<String>,
     first_fault_at_ms: Option<u64>,
@@ -136,6 +138,7 @@ impl Model {
             expired_lease_ids: BTreeSet::new(),
             lease_deadline_ms: None,
             continuous_started_ms: None,
+            deassertion_deadline_ms: None,
             first_fault_code: None,
             first_fault_id: None,
             first_fault_at_ms: None,
@@ -333,6 +336,7 @@ impl Model {
             "lease_id": self.lease_id,
             "owner": owner,
             "lease_deadline_ms": self.lease_deadline_ms,
+            "deassertion_deadline_ms": self.deassertion_deadline_ms,
             "continuous_elapsed_ms": elapsed,
             "first_fault_code": self.first_fault_code,
             "first_fault_id": self.first_fault_id,
@@ -530,12 +534,21 @@ impl Model {
                 self.expired_lease_ids.insert(lease_id.clone());
             }
         }
+        if self.commanded == "active"
+            && self.ptt_out == "active"
+            && self.deassertion_deadline_ms.is_none()
+        {
+            self.deassertion_deadline_ms = Some(self.now_ms + T_RELEASE_MAX_MS);
+        }
         self.lease_id = None;
         self.commanded = "inactive".to_owned();
         self.lease_deadline_ms = None;
         self.continuous_started_ms = None;
         self.last_release_code = Some(code.to_owned());
         self.last_release_at_ms = Some(self.now_ms);
+        if code == "output_stuck_active" {
+            self.deassertion_deadline_ms = None;
+        }
         if close_intent {
             self.intent_id = None;
         }
@@ -719,7 +732,7 @@ impl Model {
         if target_ms < self.now_ms {
             return Err("vector time moved backward".to_owned());
         }
-        if self.safety_state == "tx_active" {
+        if self.safety_state == "tx_active" && self.commanded == "active" {
             let lease = self
                 .lease_deadline_ms
                 .ok_or("active lease lacks deadline")?;
@@ -737,6 +750,17 @@ impl Model {
                     self.release("lease_expired", true);
                 }
             }
+        }
+        if self.commanded == "inactive"
+            && self.ptt_out == "active"
+            && self
+                .deassertion_deadline_ms
+                .is_some_and(|deadline| deadline <= target_ms)
+        {
+            self.now_ms = self
+                .deassertion_deadline_ms
+                .expect("checked pending deassertion deadline");
+            self.lockout("output_stuck_active");
         }
         self.now_ms = target_ms;
         Ok(())
@@ -808,17 +832,17 @@ impl Model {
     }
 
     fn intent_begin(&mut self, command: &Map<String, Value>) -> Value {
-        if self.safety_state == "fault_lockout" {
-            return error("fault_lockout", "none", false);
-        }
-        if self.intent_id.is_some() {
-            return error("intent_active", "none", false);
-        }
         let Some(intent_id) = command.get("intent_id").and_then(Value::as_str) else {
             return error("invalid_argument", "none", false);
         };
         if !is_hex_id(intent_id) {
             return error("invalid_argument", "none", false);
+        }
+        if self.safety_state == "fault_lockout" {
+            return error("fault_lockout", "none", false);
+        }
+        if self.intent_id.is_some() {
+            return error("intent_active", "none", false);
         }
         self.intent_id = Some(intent_id.to_owned());
         ok(json!({"type": "ptt_intent_begin", "intent_id": intent_id}))
@@ -851,6 +875,7 @@ impl Model {
         self.continuous_started_ms = Some(self.now_ms);
         self.commanded = "active".to_owned();
         self.ptt_out = "active".to_owned();
+        self.deassertion_deadline_ms = None;
         self.safety_state = "tx_active".to_owned();
         ok(json!({
             "type": "ptt_acquire",
@@ -1341,6 +1366,7 @@ impl Model {
             && self.ptt_out == "inactive"
             && self.safety_state != "fault_lockout"
         {
+            self.deassertion_deadline_ms = None;
             self.safety_state = "receive_safe".to_owned();
         }
         self.refresh_rearm();
@@ -1359,6 +1385,8 @@ impl Model {
             "tx_active"
         }
         .to_owned();
+        self.deassertion_deadline_ms =
+            (self.ptt_out == "active").then_some(self.now_ms + T_RELEASE_MAX_MS);
         self.next_seq = 1;
         self.cache.clear();
         self.seq_to_op.clear();

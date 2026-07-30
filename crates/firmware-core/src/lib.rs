@@ -24,6 +24,8 @@ pub mod strict_json;
 
 /// Maximum accepted v0 PTT lease.
 pub const T_LEASE_MAX_MS: u64 = 500;
+/// Maximum release interval after expiry or a detected safety event.
+pub const T_RELEASE_MAX_MS: u64 = 100;
 /// Non-extendable continuous-authority cap.
 pub const T_CONTINUOUS_MAX_MS: u64 = 60_000;
 /// Continuously receive-safe interval required after the continuous cap.
