@@ -19,13 +19,15 @@
 #define RELEASE_MAX_MS 100
 #define CONTINUOUS_MAX_MS 60000
 #define REARM_MIN_MS 1000
+#define MAX_SESSION_OPERATIONS 512
 
 static K_MUTEX_DEFINE(safety_lock);
 static struct rt_safety_snapshot state;
 static const struct device *watchdog;
 static int watchdog_channel = -1;
 static uint32_t next_fault_id = 1;
-static char expired_lease_id[33];
+static char expired_lease_ids[MAX_SESSION_OPERATIONS][33];
+static size_t expired_lease_count;
 
 static void status_notify_work_handler(struct k_work *work)
 {
@@ -91,6 +93,35 @@ static void clear_owner_locked(void)
 	state.lease_deadline_ms = 0;
 }
 
+static void clear_expired_leases_locked(void)
+{
+	expired_lease_count = 0;
+}
+
+static bool lease_expired_locked(const char *lease_id)
+{
+	for (size_t index = 0; index < expired_lease_count; ++index) {
+		if (strcmp(expired_lease_ids[index], lease_id) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void record_expired_lease_locked(const char *lease_id)
+{
+	if (lease_expired_locked(lease_id)) {
+		return;
+	}
+	/*
+	 * Every lease consumes at least one of the session's 512 operations, so
+	 * this fixed history cannot fill before the protocol session is exhausted.
+	 */
+	if (expired_lease_count < ARRAY_SIZE(expired_lease_ids)) {
+		strcpy(expired_lease_ids[expired_lease_count++], lease_id);
+	}
+}
+
 static void refresh_rearm_locked(uint64_t now)
 {
 	if (state.state != RT_FAULT_LOCKOUT ||
@@ -111,7 +142,7 @@ static void release_locked(enum rt_release_cause cause, bool lockout)
 	ptt_output_inactive();
 	rt_audio_mute_tx();
 	if (cause == RT_RELEASE_LEASE_EXPIRED && state.owner_present) {
-		strcpy(expired_lease_id, state.lease_id);
+		record_expired_lease_locked(state.lease_id);
 	}
 	clear_owner_locked();
 	state.continuous_started_ms = 0;
@@ -169,6 +200,7 @@ void rt_safety_ble_disconnected(void)
 	state.inputs.ble = RT_HEALTH_UNHEALTHY;
 	state.inputs.protocol_session = RT_HEALTH_UNHEALTHY;
 	state.inputs.host_route = RT_HEALTH_UNKNOWN;
+	clear_expired_leases_locked();
 	refresh_rearm_locked(rt_monotonic_ms());
 	k_mutex_unlock(&safety_lock);
 	status_changed();
@@ -180,6 +212,7 @@ void rt_safety_session_replaced(void)
 	k_mutex_lock(&safety_lock, K_FOREVER);
 	state.inputs.protocol_session = RT_HEALTH_UNKNOWN;
 	state.inputs.host_route = RT_HEALTH_UNKNOWN;
+	clear_expired_leases_locked();
 	refresh_rearm_locked(rt_monotonic_ms());
 	k_mutex_unlock(&safety_lock);
 	status_changed();
@@ -395,7 +428,7 @@ enum rt_lease_result rt_safety_renew(const char *boot_id,
 	enum rt_lease_result result = RT_LEASE_OK;
 	uint64_t now = rt_monotonic_ms();
 	k_mutex_lock(&safety_lock, K_FOREVER);
-	if (strcmp(expired_lease_id, lease_id) == 0) {
+	if (lease_expired_locked(lease_id)) {
 		result = RT_LEASE_EXPIRED;
 	} else if (!owner_matches_locked(boot_id, session_id, intent_id, lease_id)) {
 		result = RT_LEASE_NOT_FOUND;
@@ -576,7 +609,7 @@ int rt_safety_init(void)
 		.last_release = initial_release,
 		.last_release_at_ms = 0,
 	};
-	expired_lease_id[0] = '\0';
+	expired_lease_count = 0;
 	ptt_output_inactive();
 	rt_audio_mute_tx();
 

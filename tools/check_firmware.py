@@ -165,6 +165,7 @@ for protocol_boundary in (
     "static struct json_frame json_stack[MAX_JSON_DEPTH]",
     "static char command_json[MAX_LOGICAL_BYTES]",
     "static char json[MAX_LOGICAL_BYTES + 1]",
+    "!valid_id(message.boot_id)",
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
@@ -230,6 +231,9 @@ for safety_health_boundary in (
     "state.continuous_started_ms = accepted_at_ms",
     "rt_audio_unmute_tx()",
     "REARM_MIN_MS",
+    "static char expired_lease_ids[MAX_SESSION_OPERATIONS][33]",
+    "lease_expired_locked(lease_id)",
+    "clear_expired_leases_locked()",
 ):
     if safety_health_boundary not in safety_source:
         error(f"safety health-loss boundary is missing: {safety_health_boundary}")

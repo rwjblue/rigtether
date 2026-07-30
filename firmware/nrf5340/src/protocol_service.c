@@ -807,7 +807,8 @@ static int handle_session_start(char *json, size_t json_length,
 					ARRAY_SIZE(session_start_descr), &message);
 	const int64_t required = BIT_MASK(ARRAY_SIZE(session_start_descr));
 	if (parsed != required || strcmp(message.type, "session_start") != 0 ||
-	    !valid_id(message.client_nonce) || !valid_id(message.op_id)) {
+	    !valid_id(message.boot_id) || !valid_id(message.client_nonce) ||
+	    !valid_id(message.op_id)) {
 		if (session_active) {
 			rt_safety_protocol_fault();
 		}
