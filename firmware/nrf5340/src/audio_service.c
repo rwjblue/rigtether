@@ -31,6 +31,13 @@ void rt_audio_mute_tx(void)
 	k_mutex_unlock(&audio_lock);
 }
 
+void rt_audio_unmute_tx(void)
+{
+	k_mutex_lock(&audio_lock, K_FOREVER);
+	tx_muted = false;
+	k_mutex_unlock(&audio_lock);
+}
+
 bool rt_audio_required_healthy(void)
 {
 	bool healthy;

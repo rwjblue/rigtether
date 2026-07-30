@@ -90,8 +90,10 @@ static const char *release_cause_name(enum rt_release_cause cause)
 		return "host_route_unhealthy";
 	case RT_RELEASE_DEVICE_AUDIO:
 		return "device_audio_unhealthy";
-	case RT_RELEASE_PROFILE:
-		return "profile_not_ready";
+	case RT_RELEASE_PROFILE_CHANGE:
+		return "profile_change";
+	case RT_RELEASE_PROFILE_FAULT:
+		return "profile_fault";
 	case RT_RELEASE_RADIO_CONTROL:
 		return "radio_control_fault";
 	case RT_RELEASE_INHIBIT:
@@ -145,6 +147,9 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 	char session_json[36];
 	char profile[4];
 	char first_fault[192];
+	char owner[220];
+	char lease_deadline[32];
+	char continuous_started[32];
 	const char *safety_state;
 	const char *ble_health;
 	const char *session_health;
@@ -155,6 +160,7 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 	const char *inhibit;
 	const char *release_code;
 	const char *fault_code;
+	uint64_t now = rt_monotonic_ms();
 	rt_safety_snapshot(&snapshot);
 	rt_audio_get_health(&audio);
 	rt_protocol_selected_profile(profile);
@@ -203,6 +209,21 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 	} else {
 		strcpy(first_fault, "null");
 	}
+	if (snapshot.owner_present) {
+		snprintk(owner, sizeof(owner),
+			 "{\"boot_id\":\"%s\",\"session_id\":\"%s\","
+			 "\"lease_id\":\"%s\",\"intent_id\":\"%s\"}",
+			 snapshot.owner_boot_id, snapshot.owner_session_id,
+			 snapshot.lease_id, snapshot.intent_id);
+		snprintk(lease_deadline, sizeof(lease_deadline), "%llu",
+			 (unsigned long long)snapshot.lease_deadline_ms);
+		snprintk(continuous_started, sizeof(continuous_started), "%llu",
+			 (unsigned long long)snapshot.continuous_started_ms);
+	} else {
+		strcpy(owner, "null");
+		strcpy(lease_deadline, "null");
+		strcpy(continuous_started, "null");
+	}
 	snprintk(target, capacity,
 		 "{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
 		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":%s,"
@@ -214,14 +235,14 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 		 "\"buffers\":\"%s\",\"converter\":\"%s\"},"
 		 "\"radio_profile\":\"%s\"},\"radio\":{\"profile\":\"%s\","
 		 "\"observed_tx\":%s},\"ptt\":{\"commanded\":\"%s\","
-		 "\"ptt_out\":\"%s\",\"inhibit\":\"%s\",\"owner\":null,"
-		 "\"lease_deadline_ms\":null,\"continuous_started_ms\":null,"
-		 "\"continuous_elapsed_ms\":0,\"safety_state\":\"%s\","
+		 "\"ptt_out\":\"%s\",\"inhibit\":\"%s\",\"owner\":%s,"
+		 "\"lease_deadline_ms\":%s,\"continuous_started_ms\":%s,"
+		 "\"continuous_elapsed_ms\":%llu,\"safety_state\":\"%s\","
 		 "\"last_release\":{\"code\":\"%s\",\"at_ms\":%llu},"
 		 "\"first_fault\":%s}}",
 		 device_hex, boot_hex, session_json,
 		 (unsigned long long)sequence,
-		 (unsigned long long)rt_monotonic_ms(), ble_health, session_health,
+		 (unsigned long long)now, ble_health, session_health,
 		 host_health,
 		 audio.configured && audio.tx_stream_active && audio.clock_healthy &&
 				 audio.buffers_healthy && audio.converter_healthy ?
@@ -234,6 +255,10 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 		 audio.converter_healthy ? "healthy" : "unhealthy", profile_health,
 		 profile, observed_tx,
 		 snapshot.commanded_ptt ? "active" : "inactive", ptt_out, inhibit,
+		 owner, lease_deadline, continuous_started,
+		 (unsigned long long)(snapshot.owner_present ?
+					     now - snapshot.continuous_started_ms :
+					     0),
 		 safety_state, release_code,
 		 (unsigned long long)snapshot.last_release_at_ms, first_fault);
 	return strlen(target);

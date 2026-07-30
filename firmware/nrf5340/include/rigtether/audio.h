@@ -16,6 +16,7 @@ struct rt_audio_health {
 
 int rt_audio_init(void);
 void rt_audio_mute_tx(void);
+void rt_audio_unmute_tx(void);
 bool rt_audio_required_healthy(void);
 void rt_audio_get_health(struct rt_audio_health *health);
 void rt_audio_playback_convert(const int16_t *mono, int32_t *stereo, size_t samples);

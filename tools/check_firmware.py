@@ -152,6 +152,10 @@ for protocol_boundary in (
     'strcmp(type, "radio_tx_state_read")',
     '\\"status_seq\\":%llu',
     "rt_radio_execute_typed(&request, &outcome)",
+    "rt_safety_intent_begin(",
+    "rt_safety_acquire(",
+    "rt_safety_renew(",
+    "sys_csrand_get(random_lease",
     "if (identity[index] != '0')",
     "#define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)",
     'render_error("wrong_session", "none"',
@@ -164,6 +168,17 @@ for protocol_boundary in (
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
+
+if not all(
+    boundary in protocol_source
+    for boundary in (
+        "cached_start_length = 0;",
+        "cached_start_response_length = 0;",
+        "cached_client_nonce[0] = '\\0';",
+        "cached_start_op_id[0] = '\\0';",
+    )
+):
+    error("every session invalidation must clear cached session-start authority")
 
 if "simulator_frequency_hz" in protocol_source:
     error("nRF radio-disconnected image must not manufacture simulated CAT success")
@@ -210,9 +225,27 @@ for safety_health_boundary in (
     "inputs->host_route != RT_HEALTH_HEALTHY",
     "RT_RELEASE_HOST_ROUTE",
     "state.inputs.inhibit_known && state.inputs.inhibit_closed",
+    "state.state = RT_TX_ACTIVE",
+    "state.lease_deadline_ms = accepted_at_ms + requested_ms",
+    "state.continuous_started_ms = accepted_at_ms",
+    "rt_audio_unmute_tx()",
+    "REARM_MIN_MS",
 ):
     if safety_health_boundary not in safety_source:
         error(f"safety health-loss boundary is missing: {safety_health_boundary}")
+
+for status_authority_boundary in (
+    "snapshot.owner_present",
+    "snapshot.owner_boot_id",
+    "snapshot.owner_session_id",
+    "snapshot.lease_id",
+    "snapshot.lease_deadline_ms",
+    "snapshot.continuous_started_ms",
+):
+    if status_authority_boundary not in ble_source:
+        error(f"BLE status omits lease authority: {status_authority_boundary}")
+if 'return "profile_change"' not in ble_source:
+    error("profile selection must report the stable profile_change release code")
 
 cache_source = (ROOT / "firmware/nrf5340/src/operation_cache.c").read_text(
     encoding="utf-8"

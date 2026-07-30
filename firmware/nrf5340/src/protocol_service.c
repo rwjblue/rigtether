@@ -178,7 +178,6 @@ static uint8_t cached_start_response[MAX_LOGICAL_BYTES];
 static size_t cached_start_response_length;
 static char cached_client_nonce[33];
 static char cached_start_op_id[33];
-static char intent_identity[33];
 static char selected_profile[4] = "kx2";
 
 static void render_hex(char out[33], const uint8_t value[16])
@@ -888,7 +887,6 @@ static int handle_session_start(char *json, size_t json_length,
 	}
 	session_active = true;
 	next_seq = 1;
-	intent_identity[0] = '\0';
 	rt_safety_protocol_session_active();
 	struct rt_safety_snapshot snapshot;
 	rt_safety_snapshot(&snapshot);
@@ -967,38 +965,59 @@ static void typed_radio_result(enum rt_radio_operation operation,
 	snprintk(body, capacity, "%s", outcome.result_json);
 }
 
-static const char *acquire_precondition(void)
+static const char *lease_error_code(enum rt_lease_result result)
 {
-	struct rt_safety_snapshot snapshot;
-	rt_safety_snapshot(&snapshot);
-	if (snapshot.state == RT_FAULT_LOCKOUT) {
+	switch (result) {
+	case RT_LEASE_INTENT_REQUIRED:
+		return "intent_required";
+	case RT_LEASE_ACTIVE:
+		return "lease_active";
+	case RT_LEASE_FAULT_LOCKOUT:
+	case RT_LEASE_CONTINUOUS_CAP:
 		return "fault_lockout";
-	}
-	if (snapshot.inputs.host_route != RT_HEALTH_HEALTHY) {
+	case RT_LEASE_HOST_ROUTE:
 		return "host_route_unhealthy";
-	}
-	if (snapshot.inputs.device_audio != RT_HEALTH_HEALTHY) {
+	case RT_LEASE_DEVICE_AUDIO:
 		return "device_audio_unhealthy";
-	}
-	if (snapshot.inputs.ble != RT_HEALTH_HEALTHY ||
-	    snapshot.inputs.protocol_session != RT_HEALTH_HEALTHY) {
+	case RT_LEASE_CONTROL:
 		return "control_unhealthy";
-	}
-	if (snapshot.inputs.radio_profile != RT_HEALTH_HEALTHY) {
+	case RT_LEASE_PROFILE:
 		return "profile_not_ready";
-	}
-	if (!snapshot.inputs.inhibit_known || !snapshot.inputs.inhibit_closed) {
+	case RT_LEASE_INHIBIT:
 		return "inhibit_open";
-	}
-	if (!snapshot.inputs.ptt_out_known || snapshot.inputs.ptt_out_active) {
+	case RT_LEASE_PTT_OUT:
 		return "ptt_out_not_inactive";
+	case RT_LEASE_NOT_FOUND:
+		return "lease_not_found";
+	case RT_LEASE_EXPIRED:
+		return "lease_expired";
+	case RT_LEASE_OK:
+		break;
 	}
-	return "profile_not_ready";
+	return "protocol_fault";
+}
+
+static const char *lease_safety_effect(enum rt_lease_result result)
+{
+	switch (result) {
+	case RT_LEASE_HOST_ROUTE:
+	case RT_LEASE_DEVICE_AUDIO:
+	case RT_LEASE_PROFILE:
+	case RT_LEASE_INHIBIT:
+		return "release";
+	case RT_LEASE_CONTROL:
+	case RT_LEASE_PTT_OUT:
+	case RT_LEASE_CONTINUOUS_CAP:
+		return "lockout";
+	default:
+		return "none";
+	}
 }
 
 static void command_result(const char *type, char *json, size_t json_length,
 			   char *body, size_t capacity,
-			   bool *invalidate_session, uint64_t status_sequence)
+			   bool *invalidate_session, uint64_t status_sequence,
+			   uint64_t accepted_at_ms)
 {
 	*invalidate_session = false;
 	if (strcmp(type, "status_read") == 0) {
@@ -1037,21 +1056,22 @@ static void command_result(const char *type, char *json, size_t json_length,
 						intent_command_descr,
 						ARRAY_SIZE(intent_command_descr),
 						&command);
-		struct rt_safety_snapshot snapshot;
-		rt_safety_snapshot(&snapshot);
 		if (parsed != BIT_MASK(ARRAY_SIZE(intent_command_descr)) ||
 		    !valid_id(command.intent_id)) {
 			command_error(body, capacity, "invalid_argument", "none");
-		} else if (snapshot.state == RT_FAULT_LOCKOUT) {
-			command_error(body, capacity, "fault_lockout", "none");
-		} else if (intent_identity[0] != '\0') {
-			command_error(body, capacity, "intent_active", "none");
 		} else {
-			strcpy(intent_identity, command.intent_id);
-			snprintk(body, capacity,
-				 "\"ok\":true,\"result\":{\"type\":"
-				 "\"ptt_intent_begin\",\"intent_id\":\"%s\"}",
-				 intent_identity);
+			enum rt_intent_result result = rt_safety_intent_begin(
+				boot_identity, session_identity, command.intent_id);
+			if (result == RT_INTENT_FAULT_LOCKOUT) {
+				command_error(body, capacity, "fault_lockout", "none");
+			} else if (result == RT_INTENT_ACTIVE) {
+				command_error(body, capacity, "intent_active", "none");
+			} else {
+				snprintk(body, capacity,
+					 "\"ok\":true,\"result\":{\"type\":"
+					 "\"ptt_intent_begin\",\"intent_id\":\"%s\"}",
+					 command.intent_id);
+			}
 		}
 	} else if (strcmp(type, "ptt_acquire") == 0) {
 		struct acquire_command command = {0};
@@ -1063,11 +1083,36 @@ static void command_result(const char *type, char *json, size_t json_length,
 		    !valid_id(command.intent_id) || command.requested_ms == 0 ||
 		    command.requested_ms > 500) {
 			command_error(body, capacity, "invalid_argument", "none");
-		} else if (intent_identity[0] == '\0' ||
-			   strcmp(intent_identity, command.intent_id) != 0) {
-			command_error(body, capacity, "intent_required", "none");
 		} else {
-			command_error(body, capacity, acquire_precondition(), "none");
+			uint8_t random_lease[16];
+			char lease_id[33];
+			uint32_t granted_ms = 0;
+			uint64_t deadline_ms = 0;
+			int err = sys_csrand_get(random_lease, sizeof(random_lease));
+			if (err != 0) {
+				rt_safety_protocol_fault();
+				command_error(body, capacity, "protocol_fault",
+					      "lockout");
+				return;
+			}
+			render_hex(lease_id, random_lease);
+			enum rt_lease_result result = rt_safety_acquire(
+				boot_identity, session_identity, command.intent_id,
+				lease_id, (uint32_t)command.requested_ms,
+				accepted_at_ms, &granted_ms, &deadline_ms);
+			if (result != RT_LEASE_OK) {
+				command_error(body, capacity,
+					      lease_error_code(result),
+					      lease_safety_effect(result));
+			} else {
+				snprintk(body, capacity,
+					 "\"ok\":true,\"result\":{\"type\":"
+					 "\"ptt_acquire\",\"lease_id\":\"%s\","
+					 "\"granted_ms\":%u,"
+					 "\"lease_deadline_ms\":%llu}",
+					 lease_id, granted_ms,
+					 (unsigned long long)deadline_ms);
+			}
 		}
 	} else if (strcmp(type, "ptt_renew") == 0) {
 		struct lease_command command = {0};
@@ -1080,7 +1125,25 @@ static void command_result(const char *type, char *json, size_t json_length,
 		    command.requested_ms == 0 || command.requested_ms > 500) {
 			command_error(body, capacity, "invalid_argument", "none");
 		} else {
-			command_error(body, capacity, "lease_not_found", "none");
+			uint32_t granted_ms = 0;
+			uint64_t deadline_ms = 0;
+			enum rt_lease_result result = rt_safety_renew(
+				boot_identity, session_identity, command.intent_id,
+				command.lease_id, (uint32_t)command.requested_ms,
+				accepted_at_ms, &granted_ms, &deadline_ms);
+			if (result != RT_LEASE_OK) {
+				command_error(body, capacity,
+					      lease_error_code(result),
+					      lease_safety_effect(result));
+			} else {
+				snprintk(body, capacity,
+					 "\"ok\":true,\"result\":{\"type\":"
+					 "\"ptt_renew\",\"lease_id\":\"%s\","
+					 "\"granted_ms\":%u,"
+					 "\"lease_deadline_ms\":%llu}",
+					 command.lease_id, granted_ms,
+					 (unsigned long long)deadline_ms);
+			}
 		}
 	} else if (strcmp(type, "ptt_release") == 0) {
 		struct intent_command command = {0};
@@ -1091,12 +1154,9 @@ static void command_result(const char *type, char *json, size_t json_length,
 		if (parsed != BIT_MASK(ARRAY_SIZE(intent_command_descr)) ||
 		    !valid_id(command.intent_id)) {
 			command_error(body, capacity, "invalid_argument", "none");
-		} else if (intent_identity[0] != '\0' &&
-			   strcmp(intent_identity, command.intent_id) != 0) {
+		} else if (!rt_safety_operator_release(command.intent_id)) {
 			command_error(body, capacity, "intent_required", "none");
 		} else {
-			rt_safety_release(RT_RELEASE_OPERATOR, false);
-			intent_identity[0] = '\0';
 			snprintk(body, capacity,
 				 "\"ok\":true,\"result\":{\"type\":\"ptt_release\","
 				 "\"released\":true}");
@@ -1137,7 +1197,7 @@ static void command_result(const char *type, char *json, size_t json_length,
 			command_error(body, capacity, "invalid_argument", "none");
 		} else {
 			strcpy(selected_profile, command.profile);
-			rt_safety_release(RT_RELEASE_PROFILE, false);
+			rt_safety_release(RT_RELEASE_PROFILE_CHANGE, false);
 			struct rt_safety_snapshot snapshot;
 			rt_safety_snapshot(&snapshot);
 			snapshot.inputs.protocol_session = RT_HEALTH_UNKNOWN;
@@ -1147,7 +1207,6 @@ static void command_result(const char *type, char *json, size_t json_length,
 			rt_radio_select_profile(strcmp(command.profile, "kx2") == 0 ?
 						       RT_RADIO_PROFILE_KX2 :
 						       RT_RADIO_PROFILE_KX3);
-			intent_identity[0] = '\0';
 			*invalidate_session = true;
 			snprintk(body, capacity,
 				 "\"ok\":true,\"result\":{\"type\":"
@@ -1316,7 +1375,8 @@ static int handle_request(char *json, size_t json_length,
 	uint64_t accepted_at_ms = rt_monotonic_ms();
 	bool invalidate_session;
 	command_result(command.type, command_fields_json, message.command.length,
-		       body, sizeof(body), &invalidate_session, status_sequence);
+		       body, sizeof(body), &invalidate_session, status_sequence,
+		       accepted_at_ms);
 	uint64_t response_next_seq = next_seq + 1;
 	int length = snprintk(
 		rendered, sizeof(rendered),
@@ -1348,6 +1408,10 @@ static int handle_request(char *json, size_t json_length,
 		session_active = false;
 		session_identity[0] = '\0';
 		next_seq = 1;
+		cached_start_length = 0;
+		cached_start_response_length = 0;
+		cached_client_nonce[0] = '\0';
+		cached_start_op_id[0] = '\0';
 	}
 	return copy_response(rendered, response, response_capacity, response_length);
 }
