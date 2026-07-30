@@ -135,7 +135,18 @@ for issue_id in by_id:
     visit(issue_id, [])
 
 # Basic text hygiene for project-authored source. License texts are excluded.
-text_suffixes = {".md", ".py", ".json", ".yml", ".yaml", ".sh", ".toml"}
+text_suffixes = {
+    ".c",
+    ".conf",
+    ".h",
+    ".md",
+    ".py",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".sh",
+    ".toml",
+}
 generated_parts = {".git", ".jj", "node_modules", "target"}
 for path in ROOT.rglob("*"):
     if (
@@ -153,7 +164,7 @@ for path in ROOT.rglob("*"):
     if not text.endswith("\n"):
         error(f"{path.relative_to(ROOT)}: missing final newline")
     for number, line in enumerate(text.splitlines(), 1):
-        if "\t" in line:
+        if "\t" in line and path.suffix not in {".c", ".h"}:
             error(f"{path.relative_to(ROOT)}:{number}: tab character")
         if line.rstrip(" ") != line and path.suffix != ".md":
             error(f"{path.relative_to(ROOT)}:{number}: trailing whitespace")

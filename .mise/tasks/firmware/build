@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Build the nRF5340 DK application and HCI IPC image with NCS 3.3.0"
+set -euo pipefail
+
+if ! command -v west >/dev/null 2>&1; then
+  echo "west is unavailable; activate the pinned nRF Connect SDK v3.3.0 environment" >&2
+  exit 2
+fi
+
+west build --sysbuild \
+  --board nrf5340dk/nrf5340/cpuapp \
+  firmware/nrf5340 \
+  --build-dir target/nrf5340

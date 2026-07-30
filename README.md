@@ -75,8 +75,10 @@ KX3 interoperability is a required validation target, not an assumption.
 - [`docs/`](docs/README.md) — product, architecture, safety, roadmap, and decisions
 - [`crates/elecraft-cat/`](crates/elecraft-cat/README.md) — typed KX2/KX3 CAT core,
   document-derived fixtures, and deterministic simulator
+- [`crates/firmware-core/`](crates/firmware-core/README.md) — v0 firmware simulator,
+  virtual-clock safety model, and typed CAT integration
 - [`hardware/`](hardware/README.md) — future KiCad designs, harnesses, and mechanics
-- [`firmware/`](firmware/README.md) — future embedded software
+- [`firmware/`](firmware/README.md) — nRF5340 DK M1 C/Zephyr application and runbook
 - [`ios/`](ios/README.md) — future Swift package and reference application
 - [`protocol/`](protocol/README.md) — host/device and radio-control contracts
 - [`planning/`](planning/README.md) — one-time GitHub bootstrap manifests

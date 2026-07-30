@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Flash the already-built radio-disconnected nRF5340 DK fixture"
+set -euo pipefail
+
+if [[ ! -d target/nrf5340 ]]; then
+  echo "target/nrf5340 is absent; run 'mise run firmware:build' first" >&2
+  exit 2
+fi
+
+west flash --build-dir target/nrf5340
