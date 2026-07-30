@@ -584,21 +584,25 @@ impl Model {
         self.session_start_with_bytes(event, None)
     }
 
+    fn deny_malformed_session_start(&mut self) {
+        let active = self.session_id.is_some();
+        if active {
+            self.lockout("protocol_fault");
+        }
+        self.last_result = Some(error(
+            "malformed",
+            if active { "lockout" } else { "none" },
+            false,
+        ));
+    }
+
     fn session_start_with_bytes(
         &mut self,
         event: &Map<String, Value>,
         exact_bytes: Option<&[u8]>,
     ) -> Result<(), String> {
         if exact_bytes.is_some() && event.get("boot_id").and_then(Value::as_str).is_none() {
-            let active = self.session_id.is_some();
-            if active {
-                self.lockout("protocol_fault");
-            }
-            self.last_result = Some(error(
-                "malformed",
-                if active { "lockout" } else { "none" },
-                false,
-            ));
+            self.deny_malformed_session_start();
             return Ok(());
         }
         let request_bytes = if let Some(bytes) = exact_bytes {
@@ -606,22 +610,29 @@ impl Model {
         } else {
             canonical_session_start(event, &self.boot_id)?
         };
-        let client_nonce = string_field(event, "client_nonce")?;
-        let op_id = string_field(event, "op_id")?;
-        let capabilities = event
-            .get("required_capabilities")
-            .and_then(Value::as_array)
-            .ok_or("required_capabilities must be an array")?;
+        let Some(client_nonce) = event.get("client_nonce").and_then(Value::as_str) else {
+            self.deny_malformed_session_start();
+            return Ok(());
+        };
+        let Some(op_id) = event.get("op_id").and_then(Value::as_str) else {
+            self.deny_malformed_session_start();
+            return Ok(());
+        };
+        let Some(capabilities) = event.get("required_capabilities").and_then(Value::as_array)
+        else {
+            self.deny_malformed_session_start();
+            return Ok(());
+        };
         if !is_hex_id(client_nonce)
             || !is_hex_id(op_id)
             || capabilities.iter().any(|item| item.as_str().is_none())
         {
-            self.last_result = Some(error("malformed", "none", false));
+            self.deny_malformed_session_start();
             return Ok(());
         }
         let set: BTreeSet<&str> = capabilities.iter().filter_map(Value::as_str).collect();
         if set.len() != capabilities.len() {
-            self.last_result = Some(error("malformed", "none", false));
+            self.deny_malformed_session_start();
             return Ok(());
         }
         if self.start_bytes.is_some()
@@ -637,16 +648,31 @@ impl Model {
             });
             return Ok(());
         }
-        if event
+        let request_boot_id = event
             .get("boot_id")
             .and_then(Value::as_str)
-            .unwrap_or(&self.boot_id)
-            != self.boot_id
-        {
+            .unwrap_or(&self.boot_id);
+        if !is_hex_id(request_boot_id) {
+            self.deny_malformed_session_start();
+            return Ok(());
+        }
+        if request_boot_id != self.boot_id {
             self.last_result = Some(error("stale_boot", "none", false));
             return Ok(());
         }
-        if event.get("select") != Some(&json!({"major": 0, "minor": 0})) {
+        let Some(select) = event.get("select").and_then(Value::as_object) else {
+            self.deny_malformed_session_start();
+            return Ok(());
+        };
+        if select.get("major").and_then(Value::as_u64).is_none()
+            || select.get("minor").and_then(Value::as_u64).is_none()
+        {
+            self.deny_malformed_session_start();
+            return Ok(());
+        }
+        if select.get("major").and_then(Value::as_u64) != Some(0)
+            || select.get("minor").and_then(Value::as_u64) != Some(0)
+        {
             self.last_result = Some(error("unsupported_version", "none", false));
             return Ok(());
         }
@@ -655,8 +681,15 @@ impl Model {
             self.last_result = Some(error("missing_capability", "none", false));
             return Ok(());
         }
-        let client_limit = uint_field(event, "client_rx_frame_limit").unwrap_or(0);
-        let client_max = uint_field(event, "client_max_message_bytes").unwrap_or(0);
+        let (Some(client_limit), Some(client_max)) = (
+            event.get("client_rx_frame_limit").and_then(Value::as_u64),
+            event
+                .get("client_max_message_bytes")
+                .and_then(Value::as_u64),
+        ) else {
+            self.deny_malformed_session_start();
+            return Ok(());
+        };
         if client_limit < 20 || client_max < DEVICE_MAX_MESSAGE_BYTES {
             self.last_result = Some(error("transport_limit_too_small", "none", false));
             return Ok(());
@@ -1086,6 +1119,10 @@ impl Model {
         let seq = seq.expect("validated");
         let request_boot_id = request_boot_id.unwrap_or_else(|| self.boot_id.clone());
         let request_session_id = request_session_id.or_else(|| self.session_id.clone());
+        if self.session_id.is_none() {
+            self.last_result = Some(error("wrong_session", "none", false));
+            return Ok(());
+        }
         if request_boot_id != self.boot_id {
             self.lockout("protocol_fault");
             self.last_result = Some(error("stale_boot", "lockout", false));

@@ -154,6 +154,8 @@ for protocol_boundary in (
     "if (identity[index] != '0')",
     "published_status_seq = rt_ble_notify_status()",
     "#define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)",
+    'render_error("wrong_session", "none"',
+    '\\"code\\":\\"session_exhausted\\"',
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")

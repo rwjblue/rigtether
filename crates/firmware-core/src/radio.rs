@@ -76,25 +76,19 @@ impl<I: RadioIo> TypedRadio<I> {
             return invalid_argument();
         };
         let request = match command_type {
-            "radio_session_normalize" if object.len() == 1 => {
-                Request::Typed(Operation::NormalizeSession)
-            }
-            "radio_identify" if object.len() == 1 => Request::Typed(Operation::Identify),
-            "radio_firmware_read" if object.len() == 1 => {
-                Request::Typed(Operation::ReadFirmware { include_dsp: true })
-            }
-            "radio_vfo_a_read" if object.len() == 1 => Request::Typed(Operation::ReadFrequency),
-            "radio_vfo_a_set" if object.len() == 2 => {
+            "radio_session_normalize" => Request::Typed(Operation::NormalizeSession),
+            "radio_identify" => Request::Typed(Operation::Identify),
+            "radio_firmware_read" => Request::Typed(Operation::ReadFirmware { include_dsp: true }),
+            "radio_vfo_a_read" => Request::Typed(Operation::ReadFrequency),
+            "radio_vfo_a_set" => {
                 let Some(frequency_hz) = object.get("frequency_hz").and_then(Value::as_u64) else {
                     return invalid_argument();
                 };
                 Request::Typed(Operation::SetFrequency { frequency_hz })
             }
-            "radio_operating_state_read" if object.len() == 1 => {
-                Request::Typed(Operation::ReadOperatingState)
-            }
-            "radio_mode_read" if object.len() == 1 => Request::Typed(Operation::ReadMode),
-            "radio_tx_state_read" if object.len() == 1 => Request::Typed(Operation::ReadTxState),
+            "radio_operating_state_read" => Request::Typed(Operation::ReadOperatingState),
+            "radio_mode_read" => Request::Typed(Operation::ReadMode),
+            "radio_tx_state_read" => Request::Typed(Operation::ReadTxState),
             "raw_cat" => Request::RawCat(
                 object
                     .get("command")

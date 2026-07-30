@@ -163,7 +163,7 @@ fn consumes_strict_json_rejection_vectors() {
 fn exact_reassembled_bytes_drive_idempotency() {
     let vectors = vectors();
     let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
-    let mut model = Model::from_initial(ids, None).expect("initial state");
+    let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
     let request = br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#;
     let first = model.handle_logical(request).expect("first request");
     assert_eq!(first["type"], "response");
@@ -227,7 +227,7 @@ fn raw_session_start_requires_explicit_boot_identity() {
     assert_eq!(denial["error"]["safety_effect"], "none");
     assert_eq!(model.snapshot()["session_id"], Value::Null);
 
-    let mut active_model = Model::from_initial(ids, None).expect("active initial state");
+    let mut active_model = Model::from_initial(ids.clone(), None).expect("active initial state");
     let denial = active_model
         .handle_logical(start)
         .expect("malformed active-session start is a protocol denial");
@@ -238,6 +238,21 @@ fn raw_session_start_requires_explicit_boot_identity() {
         active_model.snapshot()["last_release_code"],
         "protocol_fault"
     );
+
+    for malformed in [
+        br#"{"type":"session_start","boot_id":"11111111111111111111111111111111","op_id":"33333333333333333333333333333333","select":{"major":0,"minor":0},"required_capabilities":["first_cause_fault_v0","independent_health_v0","ordered_operations","ptt_leases_v0","typed_radio_v0"],"client_rx_frame_limit":185,"client_max_message_bytes":4096}"#
+            .as_slice(),
+        br#"{"type":"session_start","boot_id":"11111111111111111111111111111111","client_nonce":"22222222222222222222222222222222","select":{"major":0,"minor":0},"required_capabilities":["first_cause_fault_v0","independent_health_v0","ordered_operations","ptt_leases_v0","typed_radio_v0"],"client_rx_frame_limit":185,"client_max_message_bytes":4096}"#
+            .as_slice(),
+    ] {
+        let mut model = Model::from_initial(ids.clone(), None).expect("active initial state");
+        let denial = model
+            .handle_logical(malformed)
+            .expect("missing required start identity is a protocol denial");
+        assert_eq!(denial["error"]["code"], "malformed");
+        assert_eq!(denial["error"]["safety_effect"], "lockout");
+        assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+    }
 }
 
 #[test]
@@ -253,11 +268,25 @@ fn raw_request_requires_exact_version_and_known_envelope() {
     assert_eq!(model.snapshot()["next_seq"], 1);
     assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
 
-    let mut model = Model::from_initial(ids, None).expect("initial state");
+    let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
     let denial = model
         .handle_logical(br#"{"type":"unknown"}"#)
         .expect("unknown current-session envelope is a protocol denial");
     assert_eq!(denial["error"]["code"], "malformed");
     assert_eq!(denial["error"]["safety_effect"], "lockout");
     assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
+
+    let mut model = Model::from_initial(
+        ids,
+        Some(&serde_json::json!({
+            "session": false
+        })),
+    )
+    .expect("pre-session initial state");
+    let denial = model
+        .handle_logical(br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#)
+        .expect("pre-session request is denied receive-safely");
+    assert_eq!(denial["error"]["code"], "wrong_session");
+    assert_eq!(denial["error"]["safety_effect"], "none");
+    assert_eq!(model.snapshot()["safety_state"], "receive_safe");
 }

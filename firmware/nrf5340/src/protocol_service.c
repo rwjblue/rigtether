@@ -932,7 +932,15 @@ static int handle_request(char *json, size_t json_length,
 				   copy_response(rendered, response, response_capacity,
 						 response_length);
 	}
-	if (!session_active || strcmp(message.session_id, session_identity) != 0 ||
+	if (!session_active) {
+		int length =
+			render_error("wrong_session", "none", rendered,
+				     sizeof(rendered));
+		return length < 0 ? length :
+				   copy_response(rendered, response, response_capacity,
+						 response_length);
+	}
+	if (strcmp(message.session_id, session_identity) != 0 ||
 	    strcmp(message.boot_id, boot_identity) != 0) {
 		rt_safety_protocol_fault();
 		int length =
@@ -979,11 +987,23 @@ static int handle_request(char *json, size_t json_length,
 						 response_length);
 	}
 	if (next_seq > 512) {
-		int length = render_error("session_exhausted", "none", rendered,
-					  sizeof(rendered));
-		return length < 0 ? length :
-				   copy_response(rendered, response, response_capacity,
-						 response_length);
+		uint64_t accepted_at_ms = rt_monotonic_ms();
+		int length = snprintk(
+			rendered, sizeof(rendered),
+			"{\"type\":\"response\",\"v\":{\"major\":0,\"minor\":0},"
+			"\"boot_id\":\"%s\",\"session_id\":\"%s\","
+			"\"op_id\":\"%s\",\"seq\":%llu,\"accepted_at_ms\":%llu,"
+			"\"next_seq\":%llu,\"ok\":false,\"error\":{"
+			"\"code\":\"session_exhausted\",\"safety_effect\":\"none\","
+			"\"radio_io_attempted\":false}}",
+			boot_identity, session_identity, message.op_id,
+			(unsigned long long)message.seq,
+			(unsigned long long)accepted_at_ms,
+			(unsigned long long)next_seq);
+		return length < 0 || (size_t)length >= sizeof(rendered) ?
+			       -EMSGSIZE :
+			       copy_response(rendered, response, response_capacity,
+					     response_length);
 	}
 	if (message.command.length >= sizeof(command_json)) {
 		return -EMSGSIZE;
