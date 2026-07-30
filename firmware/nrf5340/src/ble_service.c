@@ -44,7 +44,7 @@ static uint16_t response_client_limit = UINT16_MAX;
 static uint8_t device_id[16];
 static uint8_t boot_id[16];
 static char hello_value[640];
-static char status_value[1024];
+static char status_value[MAX_MESSAGE_BYTES];
 static uint64_t status_seq;
 static rt_ble_logical_handler_t logical_handler;
 static uint8_t logical_response[MAX_MESSAGE_BYTES];
@@ -137,7 +137,8 @@ static ssize_t read_hello(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	return result;
 }
 
-static size_t render_status(char *target, size_t capacity, uint64_t sequence)
+static int render_status_once(char *target, size_t capacity, uint64_t sequence,
+			      bool fault_on_overflow)
 {
 	struct rt_safety_snapshot snapshot;
 	struct rt_audio_health audio;
@@ -224,8 +225,9 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 		strcpy(lease_deadline, "null");
 		strcpy(continuous_started, "null");
 	}
-	snprintk(target, capacity,
-		 "{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
+	int rendered_length = snprintk(
+		target, capacity,
+		"{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
 		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":%s,"
 		 "\"status_seq\":%llu,\"device_time_ms\":%llu,"
 		 "\"health\":{\"ble_link\":\"%s\","
@@ -259,9 +261,29 @@ static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 		 (unsigned long long)(snapshot.owner_present ?
 					     now - snapshot.continuous_started_ms :
 					     0),
-		 safety_state, release_code,
-		 (unsigned long long)snapshot.last_release_at_ms, first_fault);
-	return strlen(target);
+		safety_state, release_code,
+		(unsigned long long)snapshot.last_release_at_ms, first_fault);
+	if (rendered_length >= 0 && (size_t)rendered_length < capacity) {
+		return rendered_length;
+	}
+
+	target[0] = '\0';
+	if (fault_on_overflow) {
+		/*
+		 * An active owner is the only full status shape that can exceed the
+		 * fixed v0 logical-message bound. Release first, latch the protocol
+		 * fault, then render the bounded owner-free fault snapshot.
+		 */
+		rt_diag_record(RT_EVENT_PROTOCOL_FAULT, EMSGSIZE);
+		rt_safety_protocol_fault();
+		return render_status_once(target, capacity, sequence, false);
+	}
+	return rendered_length < 0 ? rendered_length : -EMSGSIZE;
+}
+
+static int render_status(char *target, size_t capacity, uint64_t sequence)
+{
+	return render_status_once(target, capacity, sequence, true);
 }
 
 static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -273,10 +295,14 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		k_mutex_lock(&ble_lock, K_FOREVER);
 		uint64_t sequence = ++status_seq;
 		k_mutex_unlock(&ble_lock);
-		size_t rendered_length =
+		int rendered_length =
 			render_status(rendered, sizeof(rendered), sequence);
+		if (rendered_length < 0) {
+			k_mutex_unlock(&status_publish_lock);
+			return rendered_length;
+		}
 		k_mutex_lock(&ble_lock, K_FOREVER);
-		memcpy(status_value, rendered, rendered_length + 1);
+		memcpy(status_value, rendered, (size_t)rendered_length + 1);
 		k_mutex_unlock(&ble_lock);
 		k_mutex_unlock(&status_publish_lock);
 	}
@@ -348,11 +374,14 @@ static int accept_fragment(const uint8_t *value, uint16_t length)
 		status_seq = response_status_sequence;
 		k_mutex_unlock(&ble_lock);
 		char rendered[sizeof(status_value)];
-		size_t rendered_length =
+		int rendered_length =
 			render_status(rendered, sizeof(rendered),
 				      response_status_sequence);
-		(void)rt_ble_publish_status((const uint8_t *)rendered,
-					    rendered_length);
+		if (rendered_length >= 0) {
+			(void)rt_ble_publish_status(
+				(const uint8_t *)rendered,
+				(uint16_t)rendered_length);
+		}
 		k_mutex_unlock(&status_publish_lock);
 	}
 	rt_diag_record(RT_EVENT_PROTOCOL_FRAGMENT, payload);
@@ -812,8 +841,11 @@ uint64_t rt_ble_notify_status(void)
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	uint64_t sequence = ++status_seq;
 	k_mutex_unlock(&ble_lock);
-	size_t length = render_status(rendered, sizeof(rendered), sequence);
-	(void)rt_ble_publish_status((const uint8_t *)rendered, length);
+	int length = render_status(rendered, sizeof(rendered), sequence);
+	if (length >= 0) {
+		(void)rt_ble_publish_status((const uint8_t *)rendered,
+					    (uint16_t)length);
+	}
 	k_mutex_unlock(&status_publish_lock);
 	return sequence;
 }

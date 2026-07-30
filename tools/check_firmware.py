@@ -239,6 +239,18 @@ for status_delivery_boundary in (
             f"{status_delivery_boundary}"
         )
 
+for status_render_boundary in (
+    "static char status_value[MAX_MESSAGE_BYTES]",
+    "rendered_length >= 0 && (size_t)rendered_length < capacity",
+    "rt_safety_protocol_fault();",
+    "render_status_once(target, capacity, sequence, false)",
+):
+    if status_render_boundary not in ble_source:
+        error(
+            "status rendering can publish truncated logical JSON: "
+            f"{status_render_boundary}"
+        )
+
 monotonic_source = (ROOT / "firmware/nrf5340/src/monotonic.c").read_text(
     encoding="utf-8"
 )
