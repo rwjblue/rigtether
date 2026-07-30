@@ -15,5 +15,6 @@ uint16_t rt_ble_command_value_limit(void);
 uint16_t rt_ble_set_response_frame_limit(uint16_t client_limit);
 int rt_ble_publish_response(const uint8_t *value, uint16_t length);
 int rt_ble_publish_status(const uint8_t *value, uint16_t length);
+void rt_ble_notify_status(void);
 
 #endif

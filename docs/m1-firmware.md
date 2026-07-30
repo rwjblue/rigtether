@@ -175,10 +175,14 @@ and one bounded integer value. New records overwrite the oldest and increment an
 independent dropped/overwritten count. No audio samples, raw host JSON, raw CAT, or
 unbounded strings enter the safety log.
 
-Persistent QSPI response-cache and diagnostic-log timing/endurance remain a build and
-measurement gate. A storage, integrity, or capacity fault must end the session
-receive-safely; cache eviction within the negotiated 512-operation session is never a
-recovery strategy.
+The on-device response cache uses a RAM index over CRC-checked, append-only records in
+the fixed 4 MiB external-QSPI partition. It retains exact request and serialized
+response bytes for all 512 negotiated operations and erases only after receive-safe
+session replacement. QSPI build, erase/write latency, power-fail behavior, and
+endurance remain measurement gates. A storage, integrity, or capacity fault ends the
+session receive-safely; cache eviction within the negotiated session is never a
+recovery strategy. The adjacent 2 MiB diagnostic partition is reserved but is not
+claimed as persistent-log evidence.
 
 ## Fault injection
 

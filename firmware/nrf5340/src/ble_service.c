@@ -108,15 +108,8 @@ static void update_hello(void)
 {
 	char device_hex[33];
 	char boot_hex[33];
-	char session_id[33];
-	char session_json[36];
 	render_hex(device_hex, device_id);
 	render_hex(boot_hex, boot_id);
-	if (rt_protocol_session_id(session_id)) {
-		snprintk(session_json, sizeof(session_json), "\"%s\"", session_id);
-	} else {
-		strcpy(session_json, "null");
-	}
 	snprintk(hello_value, sizeof(hello_value),
 		 "{\"type\":\"hello\",\"device_id\":\"%s\",\"boot_id\":\"%s\","
 		 "\"versions\":[{\"major\":0,\"min_minor\":0,\"max_minor\":0}],"
@@ -140,14 +133,16 @@ static ssize_t read_hello(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	return result;
 }
 
-static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			   void *buf, uint16_t len, uint16_t offset)
+static size_t render_status(char *target, size_t capacity)
 {
 	struct rt_safety_snapshot snapshot;
 	struct rt_audio_health audio;
 	char device_hex[33];
 	char boot_hex[33];
+	char session_id[33];
+	char session_json[36];
 	char first_fault[192];
+	uint64_t rendered_status_seq;
 	const char *safety_state;
 	const char *ble_health;
 	const char *session_health;
@@ -162,6 +157,11 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 	rt_audio_get_health(&audio);
 	render_hex(device_hex, device_id);
 	render_hex(boot_hex, boot_id);
+	if (rt_protocol_session_id(session_id)) {
+		snprintk(session_json, sizeof(session_json), "\"%s\"", session_id);
+	} else {
+		strcpy(session_json, "null");
+	}
 	safety_state = snapshot.state == RT_RECEIVE_SAFE	? "receive_safe" :
 		       snapshot.state == RT_TX_ACTIVE	? "tx_active" :
 							  "fault_lockout";
@@ -198,8 +198,9 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		strcpy(first_fault, "null");
 	}
 	k_mutex_lock(&ble_lock, K_FOREVER);
-	status_seq++;
-	snprintk(status_value, sizeof(status_value),
+	rendered_status_seq = ++status_seq;
+	k_mutex_unlock(&ble_lock);
+	snprintk(target, capacity,
 		 "{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
 		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":%s,"
 		 "\"status_seq\":%llu,\"device_time_ms\":%llu,"
@@ -215,7 +216,8 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		 "\"continuous_elapsed_ms\":0,\"safety_state\":\"%s\","
 		 "\"last_release\":{\"code\":\"%s\",\"at_ms\":%llu},"
 		 "\"first_fault\":%s}}",
-		 device_hex, boot_hex, session_json, (unsigned long long)status_seq,
+		 device_hex, boot_hex, session_json,
+		 (unsigned long long)rendered_status_seq,
 		 (unsigned long long)rt_monotonic_ms(), ble_health, session_health,
 		 host_health,
 		 audio.configured && audio.tx_stream_active && audio.clock_healthy &&
@@ -230,6 +232,20 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		 observed_tx, snapshot.commanded_ptt ? "active" : "inactive", ptt_out,
 		 inhibit, safety_state, release_code,
 		 (unsigned long long)snapshot.last_release_at_ms, first_fault);
+	return strlen(target);
+}
+
+static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			   void *buf, uint16_t len, uint16_t offset)
+{
+	if (offset == 0) {
+		char rendered[sizeof(status_value)];
+		size_t rendered_length = render_status(rendered, sizeof(rendered));
+		k_mutex_lock(&ble_lock, K_FOREVER);
+		memcpy(status_value, rendered, rendered_length + 1);
+		k_mutex_unlock(&ble_lock);
+	}
+	k_mutex_lock(&ble_lock, K_FOREVER);
 	ssize_t result = bt_gatt_attr_read(conn, attr, buf, len, offset, status_value,
 					  strlen(status_value));
 	k_mutex_unlock(&ble_lock);
@@ -285,6 +301,7 @@ static int accept_fragment(const uint8_t *value, uint16_t length)
 		if (err != 0) {
 			rt_diag_record(RT_EVENT_PROTOCOL_FAULT, (uint32_t)-err);
 		}
+		rt_ble_notify_status();
 	}
 	rt_diag_record(RT_EVENT_PROTOCOL_FRAGMENT, payload);
 	return 0;
@@ -430,12 +447,21 @@ static void att_mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 {
 	ARG_UNUSED(tx);
 	ARG_UNUSED(rx);
+	bool changed = false;
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	if (current_conn == conn) {
-		command_value_limit = MAX(20, bt_gatt_get_mtu(conn) - 3);
+		uint16_t updated_limit = MAX(20, bt_gatt_get_mtu(conn) - 3);
+		changed = updated_limit != command_value_limit;
+		command_value_limit = updated_limit;
+		if (changed) {
+			response_client_limit = UINT16_MAX;
+		}
 		update_hello();
 	}
 	k_mutex_unlock(&ble_lock);
+	if (changed) {
+		rt_protocol_att_limit_changed();
+	}
 }
 
 static struct bt_gatt_cb gatt_callbacks = {
@@ -455,7 +481,10 @@ int rt_ble_service_init(void)
 	if (err != 0) {
 		return err;
 	}
-	rt_protocol_init(device_id, boot_id);
+	err = rt_protocol_init(device_id, boot_id);
+	if (err != 0) {
+		return err;
+	}
 	rt_ble_register_logical_handler(rt_protocol_handle_logical);
 	update_hello();
 	err = bt_enable(NULL);
@@ -520,10 +549,52 @@ int rt_ble_publish_response(const uint8_t *value, uint16_t length)
 
 int rt_ble_publish_status(const uint8_t *value, uint16_t length)
 {
+	if (length == 0 || length > MAX_MESSAGE_BYTES) {
+		return -EMSGSIZE;
+	}
+	uint8_t frame[517];
+	uint32_t transfer_id;
+	uint32_t sent = 0;
 	k_mutex_lock(&ble_lock, K_FOREVER);
-	int result = current_conn == NULL ? -ENOTCONN :
-					 bt_gatt_notify(current_conn, &rt_service.attrs[9],
-							value, length);
+	transfer_id = next_response_transfer_id++;
+	if (current_conn == NULL) {
+		k_mutex_unlock(&ble_lock);
+		return -ENOTCONN;
+	}
+	uint16_t frame_limit =
+		MIN(MIN(command_value_limit, response_client_limit), sizeof(frame));
+	if (frame_limit <= FRAME_HEADER) {
+		k_mutex_unlock(&ble_lock);
+		return -EMSGSIZE;
+	}
+	int result = 0;
+	while (sent < length) {
+		uint16_t payload = MIN(frame_limit - FRAME_HEADER, length - sent);
+		uint8_t flags = sent == 0 ? START_FLAG : 0;
+		if (sent + payload == length) {
+			flags |= END_FLAG;
+		}
+		frame[0] = 0;
+		frame[1] = flags;
+		sys_put_be16(0, &frame[2]);
+		sys_put_be32(transfer_id, &frame[4]);
+		sys_put_be32(length, &frame[8]);
+		sys_put_be32(sent, &frame[12]);
+		memcpy(&frame[FRAME_HEADER], &value[sent], payload);
+		result = bt_gatt_notify(current_conn, &rt_service.attrs[9], frame,
+					FRAME_HEADER + payload);
+		if (result != 0) {
+			break;
+		}
+		sent += payload;
+	}
 	k_mutex_unlock(&ble_lock);
 	return result;
+}
+
+void rt_ble_notify_status(void)
+{
+	char rendered[sizeof(status_value)];
+	size_t length = render_status(rendered, sizeof(rendered));
+	(void)rt_ble_publish_status((const uint8_t *)rendered, length);
 }

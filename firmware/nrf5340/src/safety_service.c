@@ -6,6 +6,7 @@
 #include <zephyr/sys/util.h>
 
 #include "rigtether/audio.h"
+#include "rigtether/ble_service.h"
 #include "rigtether/diagnostics.h"
 #include "rigtether/monotonic.h"
 #include "rigtether/safety.h"
@@ -20,6 +21,19 @@ static struct rt_safety_snapshot state;
 static const struct device *watchdog;
 static int watchdog_channel = -1;
 static uint32_t next_fault_id = 1;
+
+static void status_notify_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	rt_ble_notify_status();
+}
+
+K_WORK_DEFINE(status_notify_work, status_notify_work_handler);
+
+static void status_changed(void)
+{
+	(void)k_work_submit(&status_notify_work);
+}
 
 static void ptt_output_inactive(void)
 {
@@ -66,6 +80,7 @@ void rt_safety_release(enum rt_release_cause cause, bool lockout)
 	}
 	rt_diag_record(RT_EVENT_RELEASE, cause);
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 }
 
 void rt_safety_ble_connected(void)
@@ -76,6 +91,7 @@ void rt_safety_ble_connected(void)
 	state.inputs.protocol_session = RT_HEALTH_UNKNOWN;
 	state.inputs.host_route = RT_HEALTH_UNKNOWN;
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 }
 
 void rt_safety_ble_disconnected(void)
@@ -86,6 +102,7 @@ void rt_safety_ble_disconnected(void)
 	state.inputs.protocol_session = RT_HEALTH_UNHEALTHY;
 	state.inputs.host_route = RT_HEALTH_UNKNOWN;
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 }
 
 void rt_safety_session_replaced(void)
@@ -95,6 +112,7 @@ void rt_safety_session_replaced(void)
 	state.inputs.protocol_session = RT_HEALTH_UNKNOWN;
 	state.inputs.host_route = RT_HEALTH_UNKNOWN;
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 }
 
 void rt_safety_protocol_session_active(void)
@@ -102,6 +120,7 @@ void rt_safety_protocol_session_active(void)
 	k_mutex_lock(&safety_lock, K_FOREVER);
 	state.inputs.protocol_session = RT_HEALTH_HEALTHY;
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 }
 
 void rt_safety_protocol_fault(void)
@@ -110,6 +129,7 @@ void rt_safety_protocol_fault(void)
 	k_mutex_lock(&safety_lock, K_FOREVER);
 	state.inputs.protocol_session = RT_HEALTH_UNHEALTHY;
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 }
 
 void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
@@ -126,6 +146,7 @@ void rt_safety_update_inputs(const struct rt_safety_inputs *inputs)
 	output_mismatch = state.commanded_ptt && inputs->ptt_out_known &&
 			  !inputs->ptt_out_active;
 	k_mutex_unlock(&safety_lock);
+	status_changed();
 
 	if (output_mismatch) {
 		rt_safety_release(RT_RELEASE_OUTPUT_FAILED_ASSERT, true);

@@ -1,0 +1,17 @@
+&mx25r64 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		operation_cache_partition: partition@0 {
+			label = "rigtether-operation-cache";
+			reg = <0x000000 0x400000>;
+		};
+
+		diagnostic_log_partition: partition@400000 {
+			label = "rigtether-diagnostic-log";
+			reg = <0x400000 0x200000>;
+		};
+	};
+};

@@ -8,6 +8,7 @@
 
 #include "rigtether/ble_service.h"
 #include "rigtether/monotonic.h"
+#include "rigtether/operation_cache.h"
 #include "rigtether/protocol.h"
 #include "rigtether/safety.h"
 
@@ -92,12 +93,6 @@ static char boot_identity[33];
 static char session_identity[33];
 static bool session_active;
 static uint64_t next_seq = 1;
-static uint8_t cached_request[MAX_LOGICAL_BYTES];
-static size_t cached_request_length;
-static uint8_t cached_response[MAX_LOGICAL_BYTES];
-static size_t cached_response_length;
-static char cached_op_id[33];
-static uint64_t cached_seq;
 static uint8_t cached_start[MAX_LOGICAL_BYTES];
 static size_t cached_start_length;
 static uint8_t cached_start_response[MAX_LOGICAL_BYTES];
@@ -127,6 +122,132 @@ static bool valid_id(const char *value)
 		}
 	}
 	return true;
+}
+
+static void skip_whitespace(const uint8_t *json, size_t length, size_t *offset)
+{
+	while (*offset < length &&
+	       (json[*offset] == ' ' || json[*offset] == '\t' ||
+		json[*offset] == '\r' || json[*offset] == '\n')) {
+		(*offset)++;
+	}
+}
+
+static int string_bounds(const uint8_t *json, size_t length, size_t *offset,
+			 size_t *start, size_t *string_length)
+{
+	if (*offset >= length || json[*offset] != '"') {
+		return -EINVAL;
+	}
+	(*offset)++;
+	*start = *offset;
+	bool escaped = false;
+	while (*offset < length) {
+		uint8_t character = json[(*offset)++];
+		if (escaped) {
+			escaped = false;
+		} else if (character == '\\') {
+			escaped = true;
+		} else if (character == '"') {
+			*string_length = *offset - *start - 1;
+			return 0;
+		}
+	}
+	return -EINVAL;
+}
+
+static int skip_value(const uint8_t *json, size_t length, size_t *offset)
+{
+	skip_whitespace(json, length, offset);
+	if (*offset >= length) {
+		return -EINVAL;
+	}
+	if (json[*offset] == '"') {
+		size_t start;
+		size_t value_length;
+		return string_bounds(json, length, offset, &start, &value_length);
+	}
+	if (json[*offset] == '{' || json[*offset] == '[') {
+		uint8_t stack[MAX_LOGICAL_BYTES];
+		size_t depth = 0;
+		stack[depth++] = json[(*offset)++];
+		bool in_string = false;
+		bool escaped = false;
+		while (*offset < length && depth != 0) {
+			uint8_t character = json[(*offset)++];
+			if (in_string) {
+				if (escaped) {
+					escaped = false;
+				} else if (character == '\\') {
+					escaped = true;
+				} else if (character == '"') {
+					in_string = false;
+				}
+			} else if (character == '"') {
+				in_string = true;
+			} else if (character == '{' || character == '[') {
+				stack[depth++] = character;
+			} else if (character == '}' || character == ']') {
+				uint8_t expected = character == '}' ? '{' : '[';
+				if (depth == 0 || stack[depth - 1] != expected) {
+					return -EINVAL;
+				}
+				depth--;
+			}
+		}
+		return depth == 0 ? 0 : -EINVAL;
+	}
+	while (*offset < length && json[*offset] != ',' && json[*offset] != '}') {
+		(*offset)++;
+	}
+	return 0;
+}
+
+static int extract_top_level_type(const uint8_t *json, size_t length,
+				  char *type, size_t capacity)
+{
+	size_t offset = 0;
+	skip_whitespace(json, length, &offset);
+	if (offset >= length || json[offset++] != '{') {
+		return -EINVAL;
+	}
+	while (offset < length) {
+		skip_whitespace(json, length, &offset);
+		if (offset < length && json[offset] == '}') {
+			return -EINVAL;
+		}
+		size_t key_start;
+		size_t key_length;
+		if (string_bounds(json, length, &offset, &key_start, &key_length) != 0) {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, &offset);
+		if (offset >= length || json[offset++] != ':') {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, &offset);
+		if (key_length == 4 &&
+		    memcmp(&json[key_start], "type", key_length) == 0) {
+			size_t value_start;
+			size_t value_length;
+			if (string_bounds(json, length, &offset, &value_start,
+					  &value_length) != 0 ||
+			    value_length + 1 > capacity) {
+				return -EINVAL;
+			}
+			memcpy(type, &json[value_start], value_length);
+			type[value_length] = '\0';
+			return 0;
+		}
+		if (skip_value(json, length, &offset) != 0) {
+			return -EINVAL;
+		}
+		skip_whitespace(json, length, &offset);
+		if (offset >= length || json[offset++] != ',') {
+			return -EINVAL;
+		}
+	}
+	return -EINVAL;
 }
 
 static bool exact_capability_set(const struct session_start_message *message)
@@ -245,11 +366,18 @@ static int handle_session_start(char *json, size_t json_length,
 		return err;
 	}
 	render_hex(session_identity, random_session);
+	err = rt_operation_cache_reset();
+	if (err != 0) {
+		rt_safety_protocol_fault();
+		int length =
+			render_error("protocol_fault", "lockout", rendered,
+				     sizeof(rendered));
+		return length < 0 ? length :
+				   copy_response(rendered, response, response_capacity,
+						 response_length);
+	}
 	session_active = true;
 	next_seq = 1;
-	cached_request_length = 0;
-	cached_response_length = 0;
-	cached_op_id[0] = '\0';
 	rt_safety_protocol_session_active();
 	uint16_t device_limit = rt_ble_command_value_limit();
 	uint16_t tx_limit =
@@ -349,19 +477,33 @@ static int handle_request(char *json, size_t json_length,
 				   copy_response(rendered, response, response_capacity,
 						 response_length);
 	}
-	if (strcmp(message.op_id, cached_op_id) == 0 &&
-	    message.seq == cached_seq && cached_request_length != 0) {
-		if (cached_request_length == json_length &&
-		    memcmp(cached_request, exact_request, json_length) == 0) {
-			if (cached_response_length > response_capacity) {
-				return -EMSGSIZE;
-			}
-			memcpy(response, cached_response, cached_response_length);
-			*response_length = cached_response_length;
-			return 0;
-		}
+	enum rt_cache_lookup cache_lookup;
+	int cache_error = rt_operation_cache_lookup(
+		message.op_id, message.seq, exact_request, json_length, response,
+		response_capacity, response_length, &cache_lookup);
+	if (cache_error != 0) {
+		rt_safety_protocol_fault();
+		session_active = false;
+		int length =
+			render_error("protocol_fault", "lockout", rendered,
+				     sizeof(rendered));
+		return length < 0 ? length :
+				   copy_response(rendered, response, response_capacity,
+						 response_length);
+	}
+	if (cache_lookup == RT_CACHE_EXACT) {
+		return 0;
+	}
+	if (cache_lookup == RT_CACHE_ALTERED) {
 		rt_safety_protocol_fault();
 		int length = render_error("altered_duplicate", "lockout", rendered,
+					  sizeof(rendered));
+		return length < 0 ? length :
+				   copy_response(rendered, response, response_capacity,
+						 response_length);
+	}
+	if (next_seq > 512) {
+		int length = render_error("session_exhausted", "none", rendered,
 					  sizeof(rendered));
 		return length < 0 ? length :
 				   copy_response(rendered, response, response_capacity,
@@ -395,7 +537,7 @@ static int handle_request(char *json, size_t json_length,
 
 	uint64_t accepted_at_ms = rt_monotonic_ms();
 	command_result(command.type, body, sizeof(body));
-	next_seq++;
+	uint64_t response_next_seq = next_seq + 1;
 	int length = snprintk(
 		rendered, sizeof(rendered),
 		"{\"type\":\"response\",\"v\":{\"major\":0,\"minor\":0},"
@@ -403,34 +545,47 @@ static int handle_request(char *json, size_t json_length,
 		"\"seq\":%llu,\"accepted_at_ms\":%llu,\"next_seq\":%llu,%s}",
 		boot_identity, session_identity, message.op_id,
 		(unsigned long long)message.seq, (unsigned long long)accepted_at_ms,
-		(unsigned long long)next_seq, body);
+		(unsigned long long)response_next_seq, body);
 	if (length < 0 || (size_t)length >= sizeof(rendered)) {
 		return -EMSGSIZE;
 	}
-	memcpy(cached_request, exact_request, json_length);
-	cached_request_length = json_length;
-	memcpy(cached_response, rendered, length);
-	cached_response_length = length;
-	strcpy(cached_op_id, message.op_id);
-	cached_seq = message.seq;
+	cache_error = rt_operation_cache_store(
+		message.op_id, message.seq, exact_request, json_length,
+		(const uint8_t *)rendered, length);
+	if (cache_error != 0) {
+		rt_safety_protocol_fault();
+		session_active = false;
+		int error_length =
+			render_error("protocol_fault", "lockout", rendered,
+				     sizeof(rendered));
+		return error_length < 0 ?
+			       error_length :
+			       copy_response(rendered, response, response_capacity,
+					     response_length);
+	}
+	next_seq = response_next_seq;
 	return copy_response(rendered, response, response_capacity, response_length);
 }
 
-void rt_protocol_init(const uint8_t device_id[16], const uint8_t boot_id[16])
+int rt_protocol_init(const uint8_t device_id[16], const uint8_t boot_id[16])
 {
 	ARG_UNUSED(device_id);
 	k_mutex_lock(&protocol_lock, K_FOREVER);
+	int err = rt_operation_cache_init();
+	if (err != 0) {
+		k_mutex_unlock(&protocol_lock);
+		return err;
+	}
 	render_hex(boot_identity, boot_id);
 	session_identity[0] = '\0';
 	session_active = false;
 	next_seq = 1;
-	cached_request_length = 0;
-	cached_response_length = 0;
 	cached_start_length = 0;
 	cached_start_response_length = 0;
 	cached_client_nonce[0] = '\0';
 	cached_start_op_id[0] = '\0';
 	k_mutex_unlock(&protocol_lock);
+	return 0;
 }
 
 void rt_protocol_disconnect(void)
@@ -439,9 +594,23 @@ void rt_protocol_disconnect(void)
 	session_active = false;
 	session_identity[0] = '\0';
 	next_seq = 1;
-	cached_request_length = 0;
-	cached_response_length = 0;
 	k_mutex_unlock(&protocol_lock);
+}
+
+void rt_protocol_att_limit_changed(void)
+{
+	k_mutex_lock(&protocol_lock, K_FOREVER);
+	bool replaced = session_active;
+	if (replaced) {
+		session_active = false;
+		session_identity[0] = '\0';
+		next_seq = 1;
+	}
+	k_mutex_unlock(&protocol_lock);
+	if (replaced) {
+		rt_safety_session_replaced();
+		rt_ble_notify_status();
+	}
 }
 
 bool rt_protocol_session_id(char session_id[33])
@@ -463,16 +632,44 @@ int rt_protocol_handle_logical(const uint8_t *request, size_t request_length,
 		return -EMSGSIZE;
 	}
 	char json[MAX_LOGICAL_BYTES + 1];
+	char envelope_type[16];
 	memcpy(json, request, request_length);
 	json[request_length] = '\0';
+	int parsed =
+		extract_top_level_type(request, request_length, envelope_type,
+				       sizeof(envelope_type));
 	k_mutex_lock(&protocol_lock, K_FOREVER);
 	int result;
-	if (strstr(json, "\"type\":\"session_start\"") != NULL) {
+	if (parsed != 0) {
+		if (session_active) {
+			rt_safety_protocol_fault();
+		}
+		char rendered[160];
+		int length = render_error("malformed",
+					  session_active ? "lockout" : "none",
+					  rendered, sizeof(rendered));
+		result = length < 0 ?
+				 length :
+				 copy_response(rendered, response, response_capacity,
+					       response_length);
+	} else if (strcmp(envelope_type, "session_start") == 0) {
 		result = handle_session_start(json, request_length, request, response,
 					      response_capacity, response_length);
-	} else {
+	} else if (strcmp(envelope_type, "request") == 0) {
 		result = handle_request(json, request_length, request, response,
 					response_capacity, response_length);
+	} else {
+		char rendered[160];
+		int length = render_error("malformed",
+					  session_active ? "lockout" : "none",
+					  rendered, sizeof(rendered));
+		if (session_active) {
+			rt_safety_protocol_fault();
+		}
+		result = length < 0 ?
+				 length :
+				 copy_response(rendered, response, response_capacity,
+					       response_length);
 	}
 	k_mutex_unlock(&protocol_lock);
 	return result;

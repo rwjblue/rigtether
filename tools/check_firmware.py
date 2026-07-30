@@ -129,6 +129,34 @@ for envelope_field in (
 ):
     if envelope_field not in protocol_source:
         error(f"nRF logical response is missing v0 envelope field: {envelope_field}")
+for protocol_boundary in (
+    "extract_top_level_type(request, request_length",
+    "rt_operation_cache_lookup(",
+    "rt_operation_cache_store(",
+    "rt_protocol_att_limit_changed",
+):
+    if protocol_boundary not in protocol_source:
+        error(f"nRF protocol boundary is missing: {protocol_boundary}")
+
+cache_source = (ROOT / "firmware/nrf5340/src/operation_cache.c").read_text(
+    encoding="utf-8"
+)
+for cache_boundary in (
+    "#define CACHE_LIMIT 512",
+    "FIXED_PARTITION_ID(operation_cache_partition)",
+    "flash_area_write(",
+    "crc32_ieee(",
+):
+    if cache_boundary not in cache_source:
+        error(f"external-QSPI operation cache boundary is missing: {cache_boundary}")
+
+for ble_boundary in (
+    "if (offset == 0)",
+    "rt_ble_notify_status();",
+    "rt_protocol_att_limit_changed();",
+):
+    if ble_boundary not in ble_source:
+        error(f"BLE snapshot/session transition boundary is missing: {ble_boundary}")
 
 audio_source = (ROOT / "firmware/nrf5340/src/audio_service.c").read_text(
     encoding="utf-8"
