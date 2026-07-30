@@ -152,12 +152,12 @@ for protocol_boundary in (
     '\\"status_seq\\":%llu',
     "rt_radio_execute_typed(&request, &outcome)",
     "if (identity[index] != '0')",
-    "published_status_seq = rt_ble_notify_status()",
     "#define MAX_JSON_OBJECT_MEMBERS ((MAX_LOGICAL_BYTES - 2) / 4)",
     'render_error("wrong_session", "none"',
     '\\"code\\":\\"session_exhausted\\"',
     "decoded_keys_equal(json, &object_keys[index]",
     "#define MAX_JSON_DEPTH MAX_LOGICAL_BYTES",
+    "static struct json_frame json_stack[MAX_JSON_DEPTH]",
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
@@ -168,6 +168,12 @@ if "object_keys[8][24]" in protocol_source:
     error("strict JSON duplicate detection must not impose a 24-member limit")
 if 'observed_tx = "null"' not in ble_source:
     error("nRF status must not infer radio transmit state from sensed PTT")
+if 'return "watchdog_reset"' not in ble_source:
+    error("nRF status must emit the stable watchdog_reset release code")
+if 'radio\\":{\\"profile\\":\\"%s\\"' not in ble_source:
+    error("nRF status must report the selected radio profile")
+if "validate_json_value(" in protocol_source:
+    error("strict JSON validation must remain iterative on the bounded BLE thread")
 
 monotonic_source = (ROOT / "firmware/nrf5340/src/monotonic.c").read_text(
     encoding="utf-8"
@@ -214,7 +220,8 @@ for cache_boundary in (
 
 for ble_boundary in (
     "if (offset == 0)",
-    "rt_ble_notify_status();",
+    "response_status_sequence = status_seq + 1",
+    "status_publish_lock",
     "rt_protocol_att_limit_changed();",
     "BT_ATT_ERR_INSUFFICIENT_RESOURCES",
     "command_transfer.accepted = 0",

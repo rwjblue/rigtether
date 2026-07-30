@@ -1327,6 +1327,10 @@ impl Model {
         self.host_route = "unknown".to_owned();
         self.cache.clear();
         self.seq_to_op.clear();
+        self.start_client_nonce = None;
+        self.start_op_id = None;
+        self.start_bytes = None;
+        self.start_response = None;
         self.refresh_rearm();
     }
 }

@@ -7,7 +7,8 @@
 
 typedef int (*rt_ble_logical_handler_t)(const uint8_t *request, size_t request_length,
 				       uint8_t *response, size_t response_capacity,
-				       size_t *response_length);
+				       size_t *response_length,
+				       uint64_t status_sequence);
 
 int rt_ble_service_init(void);
 void rt_ble_register_logical_handler(rt_ble_logical_handler_t handler);

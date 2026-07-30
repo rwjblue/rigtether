@@ -37,6 +37,7 @@ static struct bt_uuid_128 response_uuid = BT_UUID_INIT_128(RT_RESPONSE_UUID);
 static struct bt_uuid_128 status_uuid = BT_UUID_INIT_128(RT_STATUS_UUID);
 
 static K_MUTEX_DEFINE(ble_lock);
+static K_MUTEX_DEFINE(status_publish_lock);
 static struct bt_conn *current_conn;
 static uint16_t command_value_limit = 20;
 static uint16_t response_client_limit = UINT16_MAX;
@@ -100,7 +101,7 @@ static const char *release_cause_name(enum rt_release_cause cause)
 	case RT_RELEASE_OUTPUT_STUCK_ACTIVE:
 		return "output_stuck_active";
 	case RT_RELEASE_WATCHDOG:
-		return "watchdog";
+		return "watchdog_reset";
 	}
 	return "protocol_fault";
 }
@@ -134,7 +135,7 @@ static ssize_t read_hello(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	return result;
 }
 
-static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
+static size_t render_status(char *target, size_t capacity, uint64_t sequence)
 {
 	struct rt_safety_snapshot snapshot;
 	struct rt_audio_health audio;
@@ -142,8 +143,8 @@ static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 	char boot_hex[33];
 	char session_id[33];
 	char session_json[36];
+	char profile[4];
 	char first_fault[192];
-	uint64_t rendered_status_seq;
 	const char *safety_state;
 	const char *ble_health;
 	const char *session_health;
@@ -156,6 +157,7 @@ static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 	const char *fault_code;
 	rt_safety_snapshot(&snapshot);
 	rt_audio_get_health(&audio);
+	rt_protocol_selected_profile(profile);
 	render_hex(device_hex, device_id);
 	render_hex(boot_hex, boot_id);
 	if (rt_protocol_session_id(session_id)) {
@@ -197,12 +199,6 @@ static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 	} else {
 		strcpy(first_fault, "null");
 	}
-	k_mutex_lock(&ble_lock, K_FOREVER);
-	rendered_status_seq = ++status_seq;
-	k_mutex_unlock(&ble_lock);
-	if (sequence != NULL) {
-		*sequence = rendered_status_seq;
-	}
 	snprintk(target, capacity,
 		 "{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
 		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":%s,"
@@ -212,7 +208,7 @@ static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 		 "\"device_usb_audio\":{\"aggregate\":\"%s\",\"configured\":%s,"
 		 "\"tx_stream\":\"%s\",\"clock\":\"%s\","
 		 "\"buffers\":\"%s\",\"converter\":\"%s\"},"
-		 "\"radio_profile\":\"%s\"},\"radio\":{\"profile\":null,"
+		 "\"radio_profile\":\"%s\"},\"radio\":{\"profile\":\"%s\","
 		 "\"observed_tx\":%s},\"ptt\":{\"commanded\":\"%s\","
 		 "\"ptt_out\":\"%s\",\"inhibit\":\"%s\",\"owner\":null,"
 		 "\"lease_deadline_ms\":null,\"continuous_started_ms\":null,"
@@ -220,7 +216,7 @@ static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 		 "\"last_release\":{\"code\":\"%s\",\"at_ms\":%llu},"
 		 "\"first_fault\":%s}}",
 		 device_hex, boot_hex, session_json,
-		 (unsigned long long)rendered_status_seq,
+		 (unsigned long long)sequence,
 		 (unsigned long long)rt_monotonic_ms(), ble_health, session_health,
 		 host_health,
 		 audio.configured && audio.tx_stream_active && audio.clock_healthy &&
@@ -232,8 +228,9 @@ static size_t render_status(char *target, size_t capacity, uint64_t *sequence)
 		 audio.clock_healthy ? "healthy" : "unhealthy",
 		 audio.buffers_healthy ? "healthy" : "unhealthy",
 		 audio.converter_healthy ? "healthy" : "unhealthy", profile_health,
-		 observed_tx, snapshot.commanded_ptt ? "active" : "inactive", ptt_out,
-		 inhibit, safety_state, release_code,
+		 profile, observed_tx,
+		 snapshot.commanded_ptt ? "active" : "inactive", ptt_out, inhibit,
+		 safety_state, release_code,
 		 (unsigned long long)snapshot.last_release_at_ms, first_fault);
 	return strlen(target);
 }
@@ -243,10 +240,16 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 {
 	if (offset == 0) {
 		char rendered[sizeof(status_value)];
-		size_t rendered_length = render_status(rendered, sizeof(rendered), NULL);
+		k_mutex_lock(&status_publish_lock, K_FOREVER);
+		k_mutex_lock(&ble_lock, K_FOREVER);
+		uint64_t sequence = ++status_seq;
+		k_mutex_unlock(&ble_lock);
+		size_t rendered_length =
+			render_status(rendered, sizeof(rendered), sequence);
 		k_mutex_lock(&ble_lock, K_FOREVER);
 		memcpy(status_value, rendered, rendered_length + 1);
 		k_mutex_unlock(&ble_lock);
+		k_mutex_unlock(&status_publish_lock);
 	}
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	ssize_t result = bt_gatt_attr_read(conn, attr, buf, len, offset, status_value,
@@ -293,19 +296,35 @@ static int accept_fragment(const uint8_t *value, uint16_t length)
 		if (logical_handler == NULL) {
 			return -ENOSYS;
 		}
+		k_mutex_lock(&status_publish_lock, K_FOREVER);
+		k_mutex_lock(&ble_lock, K_FOREVER);
+		uint64_t response_status_sequence = status_seq + 1;
+		k_mutex_unlock(&ble_lock);
 		int err = logical_handler(command_transfer.bytes, command_transfer.total,
 					  logical_response, sizeof(logical_response),
-					  &response_length);
+					  &response_length,
+					  response_status_sequence);
 		if (err != 0 || response_length == 0 ||
 		    response_length > sizeof(logical_response)) {
+			k_mutex_unlock(&status_publish_lock);
 			return err != 0 ? err : -EMSGSIZE;
 		}
 		err = rt_ble_publish_response(logical_response, response_length);
 		if (err != 0) {
+			k_mutex_unlock(&status_publish_lock);
 			rt_diag_record(RT_EVENT_PROTOCOL_FAULT, (uint32_t)-err);
 			return -EAGAIN;
 		}
-		rt_ble_notify_status();
+		k_mutex_lock(&ble_lock, K_FOREVER);
+		status_seq = response_status_sequence;
+		k_mutex_unlock(&ble_lock);
+		char rendered[sizeof(status_value)];
+		size_t rendered_length =
+			render_status(rendered, sizeof(rendered),
+				      response_status_sequence);
+		(void)rt_ble_publish_status((const uint8_t *)rendered,
+					    rendered_length);
+		k_mutex_unlock(&status_publish_lock);
 	}
 	rt_diag_record(RT_EVENT_PROTOCOL_FRAGMENT, payload);
 	return 0;
@@ -633,8 +652,12 @@ int rt_ble_publish_status(const uint8_t *value, uint16_t length)
 uint64_t rt_ble_notify_status(void)
 {
 	char rendered[sizeof(status_value)];
-	uint64_t sequence;
-	size_t length = render_status(rendered, sizeof(rendered), &sequence);
+	k_mutex_lock(&status_publish_lock, K_FOREVER);
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	uint64_t sequence = ++status_seq;
+	k_mutex_unlock(&ble_lock);
+	size_t length = render_status(rendered, sizeof(rendered), sequence);
 	(void)rt_ble_publish_status((const uint8_t *)rendered, length);
+	k_mutex_unlock(&status_publish_lock);
 	return sequence;
 }

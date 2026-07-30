@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rigtether_firmware_core::framing::{fragment, reassemble};
+use rigtether_firmware_core::framing::{FramingError, fragment, reassemble};
 use rigtether_firmware_core::model::{Model, VectorIds};
 use rigtether_firmware_core::strict_json::parse_object;
 use serde_json::Value;
@@ -134,6 +134,14 @@ fn consumes_malformed_framing_vectors() {
 }
 
 #[test]
+fn rejects_zero_length_incoming_transfer() {
+    let mut frame = vec![0_u8; 16];
+    frame[1] = 0x03;
+    frame[4..8].copy_from_slice(&1_u32.to_be_bytes());
+    assert_eq!(reassemble(&[frame], 1024), Err(FramingError::EmptyMessage));
+}
+
+#[test]
 fn consumes_strict_json_rejection_vectors() {
     let vectors = vectors();
     for vector in vectors["bad_messages"]
@@ -253,6 +261,37 @@ fn raw_session_start_requires_explicit_boot_identity() {
         assert_eq!(denial["error"]["safety_effect"], "lockout");
         assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
     }
+}
+
+#[test]
+fn disconnect_clears_cached_session_start() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, Some(&serde_json::json!({"session": false})))
+        .expect("pre-session initial state");
+    let start = br#"{"type":"session_start","boot_id":"11111111111111111111111111111111","client_nonce":"22222222222222222222222222222222","op_id":"33333333333333333333333333333333","select":{"major":0,"minor":0},"required_capabilities":["first_cause_fault_v0","independent_health_v0","ordered_operations","ptt_leases_v0","typed_radio_v0"],"client_rx_frame_limit":185,"client_max_message_bytes":4096}"#;
+    let first = model
+        .handle_logical(start)
+        .expect("first session negotiation");
+    let first_session = first["result"]["session_id"]
+        .as_str()
+        .expect("first session identity")
+        .to_owned();
+
+    model
+        .event(&serde_json::json!({"action": "disconnect"}))
+        .expect("disconnect");
+    model
+        .event(&serde_json::json!({"action": "reconnect"}))
+        .expect("reconnect");
+    let second = model
+        .handle_logical(start)
+        .expect("replacement session negotiation");
+    let second_session = second["result"]["session_id"]
+        .as_str()
+        .expect("second session identity");
+    assert_ne!(second_session, first_session);
+    assert_eq!(model.snapshot()["session_id"], second_session);
 }
 
 #[test]

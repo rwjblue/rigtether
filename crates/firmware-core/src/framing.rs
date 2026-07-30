@@ -169,6 +169,9 @@ pub fn reassemble(frames: &[Vec<u8>], max_message_bytes: usize) -> Result<Vec<u8
                 return Err(FramingError::InterleavedTransfer);
             }
         } else {
+            if current_total == 0 {
+                return Err(FramingError::EmptyMessage);
+            }
             if current_total > max_message_bytes {
                 return Err(FramingError::MessageTooLarge);
             }

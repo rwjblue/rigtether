@@ -552,110 +552,27 @@ static bool decoded_keys_equal(const uint8_t *json,
 	return left_offset == left_end && right_offset == right_end;
 }
 
-static int validate_json_value(const uint8_t *json, size_t length,
-			       size_t *offset, size_t depth);
+enum json_phase {
+	JSON_OBJECT_FIRST_KEY_OR_END,
+	JSON_OBJECT_KEY,
+	JSON_OBJECT_COLON,
+	JSON_OBJECT_VALUE,
+	JSON_OBJECT_COMMA_OR_END,
+	JSON_ARRAY_FIRST_VALUE_OR_END,
+	JSON_ARRAY_VALUE,
+	JSON_ARRAY_COMMA_OR_END,
+};
 
-static int validate_json_object(const uint8_t *json, size_t length,
-				size_t *offset, size_t depth)
-{
-	if (depth >= MAX_JSON_DEPTH || json[(*offset)++] != '{') {
-		return -EINVAL;
-	}
-	uint16_t scope = next_object_scope++;
-	skip_whitespace(json, length, offset);
-	if (*offset < length && json[*offset] == '}') {
-		(*offset)++;
-		return 0;
-	}
-	while (*offset < length) {
-		size_t key_start;
-		size_t key_length;
-		if (object_key_count >= ARRAY_SIZE(object_keys) ||
-		    string_bounds(json, length, offset, &key_start, &key_length) != 0) {
-			return -EINVAL;
-		}
-		for (size_t index = 0; index < object_key_count; ++index) {
-			if (object_keys[index].scope == scope &&
-			    decoded_keys_equal(json, &object_keys[index], key_start,
-					       key_length)) {
-				return -EEXIST;
-			}
-		}
-		object_keys[object_key_count++] = (struct key_slice){
-			.start = key_start,
-			.length = key_length,
-			.scope = scope,
-		};
-		skip_whitespace(json, length, offset);
-		if (*offset >= length || json[(*offset)++] != ':') {
-			return -EINVAL;
-		}
-		if (validate_json_value(json, length, offset, depth + 1) != 0) {
-			return -EINVAL;
-		}
-		skip_whitespace(json, length, offset);
-		if (*offset >= length) {
-			return -EINVAL;
-		}
-		uint8_t delimiter = json[(*offset)++];
-		if (delimiter == '}') {
-			return 0;
-		}
-		if (delimiter != ',') {
-			return -EINVAL;
-		}
-		skip_whitespace(json, length, offset);
-	}
-	return -EINVAL;
-}
+struct json_frame {
+	enum json_phase phase;
+	uint16_t scope;
+};
 
-static int validate_json_array(const uint8_t *json, size_t length,
-			       size_t *offset, size_t depth)
-{
-	if (json[(*offset)++] != '[') {
-		return -EINVAL;
-	}
-	skip_whitespace(json, length, offset);
-	if (*offset < length && json[*offset] == ']') {
-		(*offset)++;
-		return 0;
-	}
-	while (*offset < length) {
-		if (validate_json_value(json, length, offset, depth + 1) != 0) {
-			return -EINVAL;
-		}
-		skip_whitespace(json, length, offset);
-		if (*offset >= length) {
-			return -EINVAL;
-		}
-		uint8_t delimiter = json[(*offset)++];
-		if (delimiter == ']') {
-			return 0;
-		}
-		if (delimiter != ',') {
-			return -EINVAL;
-		}
-		skip_whitespace(json, length, offset);
-	}
-	return -EINVAL;
-}
+static struct json_frame json_stack[MAX_JSON_DEPTH];
 
-static int validate_json_value(const uint8_t *json, size_t length,
-			       size_t *offset, size_t depth)
+static int validate_json_scalar(const uint8_t *json, size_t length,
+				size_t *offset)
 {
-	if (depth >= MAX_JSON_DEPTH) {
-		return -EINVAL;
-	}
-	skip_whitespace(json, length, offset);
-	if (*offset >= length) {
-		return -EINVAL;
-	}
-	if (json[*offset] == '{') {
-		return validate_json_object(json, length, offset, depth);
-	}
-	if (json[*offset] == '[') {
-		return validate_json_array(json, length, offset, depth);
-	}
 	if (json[*offset] == '"') {
 		size_t start;
 		size_t value_length;
@@ -695,14 +612,146 @@ static int validate_json_value(const uint8_t *json, size_t length,
 	return 0;
 }
 
+static int push_json_value(const uint8_t *json, size_t length, size_t *offset,
+			   size_t *depth)
+{
+	skip_whitespace(json, length, offset);
+	if (*offset >= length) {
+		return -EINVAL;
+	}
+	if (json[*offset] == '{' || json[*offset] == '[') {
+		if (*depth >= ARRAY_SIZE(json_stack)) {
+			return -EINVAL;
+		}
+		bool object = json[*offset] == '{';
+		(*offset)++;
+		json_stack[(*depth)++] = (struct json_frame){
+			.phase = object ? JSON_OBJECT_FIRST_KEY_OR_END :
+					  JSON_ARRAY_FIRST_VALUE_OR_END,
+			.scope = object ? next_object_scope++ : 0,
+		};
+		return 0;
+	}
+	return validate_json_scalar(json, length, offset);
+}
+
+static int add_object_key(const uint8_t *json, size_t length, size_t *offset,
+			  uint16_t scope)
+{
+	size_t key_start;
+	size_t key_length;
+	if (object_key_count >= ARRAY_SIZE(object_keys) ||
+	    string_bounds(json, length, offset, &key_start, &key_length) != 0) {
+		return -EINVAL;
+	}
+	for (size_t index = 0; index < object_key_count; ++index) {
+		if (object_keys[index].scope == scope &&
+		    decoded_keys_equal(json, &object_keys[index], key_start,
+				       key_length)) {
+			return -EEXIST;
+		}
+	}
+	object_keys[object_key_count++] = (struct key_slice){
+		.start = key_start,
+		.length = key_length,
+		.scope = scope,
+	};
+	return 0;
+}
+
 static int validate_no_duplicate_members(const uint8_t *json, size_t length)
 {
 	size_t offset = 0;
+	size_t depth = 0;
 	object_key_count = 0;
 	next_object_scope = 0;
-	int result = validate_json_value(json, length, &offset, 0);
 	skip_whitespace(json, length, &offset);
-	return result == 0 && offset == length ? 0 : -EINVAL;
+	if (offset >= length || json[offset] != '{' ||
+	    push_json_value(json, length, &offset, &depth) != 0) {
+		return -EINVAL;
+	}
+	while (depth != 0) {
+		struct json_frame *frame = &json_stack[depth - 1];
+		skip_whitespace(json, length, &offset);
+		if (offset >= length) {
+			return -EINVAL;
+		}
+		switch (frame->phase) {
+		case JSON_OBJECT_FIRST_KEY_OR_END:
+			if (json[offset] == '}') {
+				offset++;
+				depth--;
+			} else {
+				int result =
+					add_object_key(json, length, &offset, frame->scope);
+				if (result != 0) {
+					return result;
+				}
+				frame->phase = JSON_OBJECT_COLON;
+			}
+			break;
+		case JSON_OBJECT_KEY: {
+			int result =
+				add_object_key(json, length, &offset, frame->scope);
+			if (result != 0) {
+				return result;
+			}
+			frame->phase = JSON_OBJECT_COLON;
+			break;
+		}
+		case JSON_OBJECT_COLON:
+			if (json[offset++] != ':') {
+				return -EINVAL;
+			}
+			frame->phase = JSON_OBJECT_VALUE;
+			break;
+		case JSON_OBJECT_VALUE:
+			frame->phase = JSON_OBJECT_COMMA_OR_END;
+			if (push_json_value(json, length, &offset, &depth) != 0) {
+				return -EINVAL;
+			}
+			break;
+		case JSON_OBJECT_COMMA_OR_END:
+			if (json[offset] == '}') {
+				offset++;
+				depth--;
+			} else if (json[offset++] == ',') {
+				frame->phase = JSON_OBJECT_KEY;
+			} else {
+				return -EINVAL;
+			}
+			break;
+		case JSON_ARRAY_FIRST_VALUE_OR_END:
+			if (json[offset] == ']') {
+				offset++;
+				depth--;
+			} else {
+				frame->phase = JSON_ARRAY_COMMA_OR_END;
+				if (push_json_value(json, length, &offset, &depth) != 0) {
+					return -EINVAL;
+				}
+			}
+			break;
+		case JSON_ARRAY_VALUE:
+			frame->phase = JSON_ARRAY_COMMA_OR_END;
+			if (push_json_value(json, length, &offset, &depth) != 0) {
+				return -EINVAL;
+			}
+			break;
+		case JSON_ARRAY_COMMA_OR_END:
+			if (json[offset] == ']') {
+				offset++;
+				depth--;
+			} else if (json[offset++] == ',') {
+				frame->phase = JSON_ARRAY_VALUE;
+			} else {
+				return -EINVAL;
+			}
+			break;
+		}
+	}
+	skip_whitespace(json, length, &offset);
+	return offset == length ? 0 : -EINVAL;
 }
 
 static bool exact_capability_set(const struct session_start_message *message)
@@ -948,15 +997,14 @@ static const char *acquire_precondition(void)
 
 static void command_result(const char *type, char *json, size_t json_length,
 			   char *body, size_t capacity,
-			   bool *invalidate_session)
+			   bool *invalidate_session, uint64_t status_sequence)
 {
 	*invalidate_session = false;
 	if (strcmp(type, "status_read") == 0) {
-		uint64_t published_status_seq = rt_ble_notify_status();
 		snprintk(body, capacity,
 			 "\"ok\":true,\"result\":{\"type\":\"status_read\","
 			 "\"status_seq\":%llu}",
-			 (unsigned long long)published_status_seq);
+			 (unsigned long long)status_sequence);
 	} else if (strcmp(type, "host_audio_route_report") == 0) {
 		struct health_command command = {0};
 		int64_t parsed = json_obj_parse(json, json_length,
@@ -1147,7 +1195,8 @@ static void command_result(const char *type, char *json, size_t json_length,
 
 static int handle_request(char *json, size_t json_length,
 			  const uint8_t *exact_request, uint8_t *response,
-			  size_t response_capacity, size_t *response_length)
+			  size_t response_capacity, size_t *response_length,
+			  uint64_t status_sequence)
 {
 	struct request_message message = {0};
 	char rendered[MAX_LOGICAL_BYTES];
@@ -1265,7 +1314,7 @@ static int handle_request(char *json, size_t json_length,
 	uint64_t accepted_at_ms = rt_monotonic_ms();
 	bool invalidate_session;
 	command_result(command.type, command_fields_json, message.command.length,
-		       body, sizeof(body), &invalidate_session);
+		       body, sizeof(body), &invalidate_session, status_sequence);
 	uint64_t response_next_seq = next_seq + 1;
 	int length = snprintk(
 		rendered, sizeof(rendered),
@@ -1374,9 +1423,17 @@ bool rt_protocol_session_active(void)
 	return active;
 }
 
+void rt_protocol_selected_profile(char profile[4])
+{
+	k_mutex_lock(&protocol_lock, K_FOREVER);
+	strcpy(profile, selected_profile);
+	k_mutex_unlock(&protocol_lock);
+}
+
 int rt_protocol_handle_logical(const uint8_t *request, size_t request_length,
 			       uint8_t *response, size_t response_capacity,
-			       size_t *response_length)
+			       size_t *response_length,
+			       uint64_t status_sequence)
 {
 	if (request_length == 0 || request_length > MAX_LOGICAL_BYTES) {
 		return -EMSGSIZE;
@@ -1409,7 +1466,8 @@ int rt_protocol_handle_logical(const uint8_t *request, size_t request_length,
 					      response_capacity, response_length);
 	} else if (strcmp(envelope_type, "request") == 0) {
 		result = handle_request(json, request_length, request, response,
-					response_capacity, response_length);
+					response_capacity, response_length,
+					status_sequence);
 	} else {
 		char rendered[160];
 		int length = render_error("malformed",
