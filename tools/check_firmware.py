@@ -149,6 +149,7 @@ for protocol_boundary in (
     'strcmp(type, "radio_operating_state_read")',
     'strcmp(type, "radio_mode_read")',
     'strcmp(type, "radio_tx_state_read")',
+    '\\"status_seq\\":%llu',
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")

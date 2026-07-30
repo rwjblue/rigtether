@@ -678,7 +678,9 @@ static void command_result(const char *type, char *json, size_t json_length,
 	*invalidate_session = false;
 	if (strcmp(type, "status_read") == 0) {
 		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":\"status_read\"}");
+			 "\"ok\":true,\"result\":{\"type\":\"status_read\","
+			 "\"status_seq\":%llu}",
+			 (unsigned long long)rt_ble_status_seq());
 	} else if (strcmp(type, "host_audio_route_report") == 0) {
 		struct health_command command = {0};
 		int64_t parsed = json_obj_parse(json, json_length,
@@ -952,18 +954,18 @@ static int handle_request(char *json, size_t json_length,
 				   copy_response(rendered, response, response_capacity,
 						 response_length);
 	}
-	if (next_seq > 512) {
-		int length = render_error("session_exhausted", "none", rendered,
-					  sizeof(rendered));
-		return length < 0 ? length :
-				   copy_response(rendered, response, response_capacity,
-						 response_length);
-	}
 	if (message.seq != next_seq) {
 		rt_safety_protocol_fault();
 		int length = render_error(message.seq < next_seq ? "stale_operation" :
 							       "out_of_order",
 					  "lockout", rendered, sizeof(rendered));
+		return length < 0 ? length :
+				   copy_response(rendered, response, response_capacity,
+						 response_length);
+	}
+	if (next_seq > 512) {
+		int length = render_error("session_exhausted", "none", rendered,
+					  sizeof(rendered));
 		return length < 0 ? length :
 				   copy_response(rendered, response, response_capacity,
 						 response_length);
@@ -1052,6 +1054,10 @@ void rt_protocol_disconnect(void)
 	session_active = false;
 	session_identity[0] = '\0';
 	next_seq = 1;
+	cached_start_length = 0;
+	cached_start_response_length = 0;
+	cached_client_nonce[0] = '\0';
+	cached_start_op_id[0] = '\0';
 	k_mutex_unlock(&protocol_lock);
 }
 
@@ -1063,6 +1069,10 @@ void rt_protocol_att_limit_changed(void)
 		session_active = false;
 		session_identity[0] = '\0';
 		next_seq = 1;
+		cached_start_length = 0;
+		cached_start_response_length = 0;
+		cached_client_nonce[0] = '\0';
+		cached_start_op_id[0] = '\0';
 	}
 	k_mutex_unlock(&protocol_lock);
 	if (replaced) {

@@ -634,3 +634,11 @@ void rt_ble_notify_status(void)
 	size_t length = render_status(rendered, sizeof(rendered));
 	(void)rt_ble_publish_status((const uint8_t *)rendered, length);
 }
+
+uint64_t rt_ble_status_seq(void)
+{
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	uint64_t value = status_seq;
+	k_mutex_unlock(&ble_lock);
+	return value;
+}

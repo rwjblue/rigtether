@@ -732,7 +732,10 @@ impl Model {
             return error("invalid_argument", "none", false);
         };
         match command_type {
-            "status_read" => ok(json!({"type": command_type})),
+            "status_read" => ok(json!({
+                "type": command_type,
+                "status_seq": self.status_seq
+            })),
             "host_audio_route_report" => {
                 let Some(health) = command.get("health").and_then(Value::as_str) else {
                     return error("invalid_argument", "none", false);
