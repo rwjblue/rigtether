@@ -19,6 +19,7 @@ static K_MUTEX_DEFINE(safety_lock);
 static struct rt_safety_snapshot state;
 static const struct device *watchdog;
 static int watchdog_channel = -1;
+static uint32_t next_fault_id = 1;
 
 static void ptt_output_inactive(void)
 {
@@ -50,12 +51,14 @@ void rt_safety_release(enum rt_release_cause cause, bool lockout)
 	state.lease_deadline_ms = 0;
 	state.continuous_started_ms = 0;
 	state.last_release = cause;
+	state.last_release_at_ms = rt_monotonic_ms();
 	if (lockout) {
 		state.state = RT_FAULT_LOCKOUT;
 		if (!state.first_fault_present) {
 			state.first_fault_present = true;
+			state.first_fault_id = next_fault_id++;
 			state.first_fault = cause;
-			state.first_fault_at_ms = rt_monotonic_ms();
+			state.first_fault_at_ms = state.last_release_at_ms;
 			rt_diag_record(RT_EVENT_FIRST_FAULT, cause);
 		}
 	} else if (inputs_allow_receive_safe()) {
@@ -91,6 +94,13 @@ void rt_safety_session_replaced(void)
 	k_mutex_lock(&safety_lock, K_FOREVER);
 	state.inputs.protocol_session = RT_HEALTH_UNKNOWN;
 	state.inputs.host_route = RT_HEALTH_UNKNOWN;
+	k_mutex_unlock(&safety_lock);
+}
+
+void rt_safety_protocol_session_active(void)
+{
+	k_mutex_lock(&safety_lock, K_FOREVER);
+	state.inputs.protocol_session = RT_HEALTH_HEALTHY;
 	k_mutex_unlock(&safety_lock);
 }
 
@@ -202,6 +212,7 @@ int rt_safety_init(void)
 		},
 		.commanded_ptt = false,
 		.last_release = RT_RELEASE_BOOT_OR_UPDATE,
+		.last_release_at_ms = 0,
 	};
 	ptt_output_inactive();
 	rt_audio_mute_tx();

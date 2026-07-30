@@ -97,6 +97,45 @@ for role in required_roles:
     if role not in ble_source:
         error(f"BLE characteristic role missing or changed: {role.split(',')[0]}")
 
+required_dispatch = [
+    "logical_handler(command_transfer.bytes, command_transfer.total",
+    "rt_ble_publish_response(logical_response, response_length)",
+    "rt_ble_register_logical_handler(rt_protocol_handle_logical)",
+]
+for dispatch in required_dispatch:
+    if dispatch not in ble_source:
+        error(f"completed BLE commands are not dispatched through the logical core: {dispatch}")
+
+required_snapshot_fields = [
+    "snapshot.state",
+    "snapshot.last_release",
+    "snapshot.first_fault",
+    "snapshot.inputs.ptt_out_active",
+    "snapshot.inputs.inhibit_closed",
+    "snapshot.inputs.protocol_session",
+]
+for field in required_snapshot_fields:
+    if field not in ble_source:
+        error(f"BLE status does not render safety snapshot field: {field}")
+
+protocol_source = (ROOT / "firmware/nrf5340/src/protocol_service.c").read_text(
+    encoding="utf-8"
+)
+for envelope_field in (
+    '\\"accepted_at_ms\\":',
+    '\\"next_seq\\":',
+    '\\"session_id\\":',
+    '\\"op_id\\":',
+):
+    if envelope_field not in protocol_source:
+        error(f"nRF logical response is missing v0 envelope field: {envelope_field}")
+
+audio_source = (ROOT / "firmware/nrf5340/src/audio_service.c").read_text(
+    encoding="utf-8"
+)
+if "-((-sample + 128) >> 8)" not in audio_source:
+    error("nRF capture conversion must round negative samples without a one-LSB bias")
+
 prj_conf = (ROOT / "firmware/nrf5340/prj.conf").read_text(encoding="utf-8")
 if "CONFIG_RIGTETHER_PTT_OUTPUT_ENABLED=n" not in prj_conf:
     error("radio-disconnected fixture must default PTT output to disabled")
@@ -116,6 +155,7 @@ if ERRORS:
     raise SystemExit(1)
 
 print(
-    "Validated exact BLE UUIDs/roles, canonical UAC1 descriptor parity, "
+    "Validated exact BLE UUIDs/roles, logical dispatch and response identity, "
+    "safety-snapshot status rendering, canonical UAC1 descriptor parity, "
     "radio-disconnected PTT default, and conditional-MIDI boundary."
 )

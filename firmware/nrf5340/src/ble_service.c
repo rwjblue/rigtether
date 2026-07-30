@@ -11,9 +11,11 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
 
+#include "rigtether/audio.h"
 #include "rigtether/ble_service.h"
 #include "rigtether/diagnostics.h"
 #include "rigtether/monotonic.h"
+#include "rigtether/protocol.h"
 #include "rigtether/safety.h"
 
 #define FRAME_HEADER 16
@@ -36,10 +38,14 @@ static struct bt_uuid_128 status_uuid = BT_UUID_INIT_128(RT_STATUS_UUID);
 static K_MUTEX_DEFINE(ble_lock);
 static struct bt_conn *current_conn;
 static uint16_t command_value_limit = 20;
+static uint16_t response_client_limit = UINT16_MAX;
 static uint8_t device_id[16];
 static uint8_t boot_id[16];
 static char hello_value[640];
-static char status_value[768];
+static char status_value[1024];
+static uint64_t status_seq;
+static rt_ble_logical_handler_t logical_handler;
+static uint8_t logical_response[MAX_MESSAGE_BYTES];
 
 struct transfer {
 	bool active;
@@ -61,12 +67,56 @@ static void render_hex(char out[33], const uint8_t value[16])
 	out[32] = '\0';
 }
 
+static const char *release_cause_name(enum rt_release_cause cause)
+{
+	switch (cause) {
+	case RT_RELEASE_BOOT_OR_UPDATE:
+		return "boot_or_update";
+	case RT_RELEASE_OPERATOR:
+		return "operator_release";
+	case RT_RELEASE_LEASE_EXPIRED:
+		return "lease_expired";
+	case RT_RELEASE_CONTINUOUS_CAP:
+		return "continuous_cap";
+	case RT_RELEASE_BLE_DISCONNECT:
+		return "ble_disconnect";
+	case RT_RELEASE_SESSION_REPLACED:
+		return "session_replaced";
+	case RT_RELEASE_PROTOCOL_FAULT:
+		return "protocol_fault";
+	case RT_RELEASE_HOST_ROUTE:
+		return "host_route_unhealthy";
+	case RT_RELEASE_DEVICE_AUDIO:
+		return "device_audio_unhealthy";
+	case RT_RELEASE_PROFILE:
+		return "profile_not_ready";
+	case RT_RELEASE_RADIO_CONTROL:
+		return "radio_control_fault";
+	case RT_RELEASE_INHIBIT:
+		return "inhibit_open";
+	case RT_RELEASE_OUTPUT_FAILED_ASSERT:
+		return "output_failed_to_assert";
+	case RT_RELEASE_OUTPUT_STUCK_ACTIVE:
+		return "output_stuck_active";
+	case RT_RELEASE_WATCHDOG:
+		return "watchdog";
+	}
+	return "protocol_fault";
+}
+
 static void update_hello(void)
 {
 	char device_hex[33];
 	char boot_hex[33];
+	char session_id[33];
+	char session_json[36];
 	render_hex(device_hex, device_id);
 	render_hex(boot_hex, boot_id);
+	if (rt_protocol_session_id(session_id)) {
+		snprintk(session_json, sizeof(session_json), "\"%s\"", session_id);
+	} else {
+		strcpy(session_json, "null");
+	}
 	snprintk(hello_value, sizeof(hello_value),
 		 "{\"type\":\"hello\",\"device_id\":\"%s\",\"boot_id\":\"%s\","
 		 "\"versions\":[{\"major\":0,\"min_minor\":0,\"max_minor\":0}],"
@@ -94,30 +144,96 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 			   void *buf, uint16_t len, uint16_t offset)
 {
 	struct rt_safety_snapshot snapshot;
+	struct rt_audio_health audio;
 	char device_hex[33];
 	char boot_hex[33];
+	char first_fault[192];
+	const char *safety_state;
+	const char *ble_health;
+	const char *session_health;
+	const char *host_health;
+	const char *profile_health;
+	const char *ptt_out;
+	const char *observed_tx;
+	const char *inhibit;
+	const char *release_code;
+	const char *fault_code;
 	rt_safety_snapshot(&snapshot);
+	rt_audio_get_health(&audio);
 	render_hex(device_hex, device_id);
 	render_hex(boot_hex, boot_id);
+	safety_state = snapshot.state == RT_RECEIVE_SAFE	? "receive_safe" :
+		       snapshot.state == RT_TX_ACTIVE	? "tx_active" :
+							  "fault_lockout";
+	ble_health = snapshot.inputs.ble == RT_HEALTH_HEALTHY	? "connected" :
+		     snapshot.inputs.ble == RT_HEALTH_UNHEALTHY	? "disconnected" :
+								      "unknown";
+	session_health = snapshot.inputs.protocol_session == RT_HEALTH_HEALTHY ? "active" :
+			 snapshot.inputs.protocol_session == RT_HEALTH_UNHEALTHY ?
+				 "faulted" :
+				 "none";
+	host_health = snapshot.inputs.host_route == RT_HEALTH_HEALTHY	? "healthy" :
+		      snapshot.inputs.host_route == RT_HEALTH_UNHEALTHY ? "unhealthy" :
+									"unknown";
+	profile_health = snapshot.inputs.radio_profile == RT_HEALTH_HEALTHY ? "ready" :
+			 snapshot.inputs.radio_profile == RT_HEALTH_UNHEALTHY ?
+				 "faulted" :
+				 "none";
+	ptt_out = !snapshot.inputs.ptt_out_known ? "unknown" :
+		  snapshot.inputs.ptt_out_active  ? "active" :
+						     "inactive";
+	observed_tx = snapshot.inputs.ptt_out_known && snapshot.inputs.ptt_out_active ?
+			      "transmit_or_pseudo_transmit" :
+			      "receive";
+	inhibit = snapshot.inputs.inhibit_closed ? "closed" : "open";
+	release_code = release_cause_name(snapshot.last_release);
+	if (snapshot.first_fault_present) {
+		fault_code = release_cause_name(snapshot.first_fault);
+		snprintk(first_fault, sizeof(first_fault),
+			 "{\"fault_id\":\"%032x\",\"code\":\"%s\",\"at_ms\":%llu,"
+			 "\"op_id\":null}",
+			 snapshot.first_fault_id, fault_code,
+			 (unsigned long long)snapshot.first_fault_at_ms);
+	} else {
+		strcpy(first_fault, "null");
+	}
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	status_seq++;
 	snprintk(status_value, sizeof(status_value),
 		 "{\"type\":\"status\",\"v\":{\"major\":0,\"minor\":0},"
-		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":null,"
-		 "\"status_seq\":0,\"device_time_ms\":%llu,"
-		 "\"health\":{\"ble_link\":\"connected\","
-		 "\"protocol_session\":\"none\",\"host_usb_audio_route\":\"unknown\","
-		 "\"device_usb_audio\":{\"aggregate\":\"unknown\",\"configured\":false,"
-		 "\"tx_stream\":\"inactive\",\"clock\":\"unhealthy\","
-		 "\"buffers\":\"unhealthy\",\"converter\":\"unhealthy\"},"
-		 "\"radio_profile\":\"none\"},\"radio\":{\"profile\":null,"
-		 "\"observed_tx\":\"receive\"},\"ptt\":{\"commanded\":\"inactive\","
-		 "\"ptt_out\":\"unknown\",\"inhibit\":\"unknown\",\"owner\":null,"
+		 "\"device_id\":\"%s\",\"boot_id\":\"%s\",\"session_id\":%s,"
+		 "\"status_seq\":%llu,\"device_time_ms\":%llu,"
+		 "\"health\":{\"ble_link\":\"%s\","
+		 "\"protocol_session\":\"%s\",\"host_usb_audio_route\":\"%s\","
+		 "\"device_usb_audio\":{\"aggregate\":\"%s\",\"configured\":%s,"
+		 "\"tx_stream\":\"%s\",\"clock\":\"%s\","
+		 "\"buffers\":\"%s\",\"converter\":\"%s\"},"
+		 "\"radio_profile\":\"%s\"},\"radio\":{\"profile\":null,"
+		 "\"observed_tx\":\"%s\"},\"ptt\":{\"commanded\":\"%s\","
+		 "\"ptt_out\":\"%s\",\"inhibit\":\"%s\",\"owner\":null,"
 		 "\"lease_deadline_ms\":null,\"continuous_started_ms\":null,"
-		 "\"continuous_elapsed_ms\":0,\"safety_state\":\"receive_safe\","
-		 "\"last_release\":{\"code\":\"boot_or_update\",\"at_ms\":0},"
-		 "\"first_fault\":null}}",
-		 device_hex, boot_hex, (unsigned long long)rt_monotonic_ms());
-	return bt_gatt_attr_read(conn, attr, buf, len, offset, status_value,
-				 strlen(status_value));
+		 "\"continuous_elapsed_ms\":0,\"safety_state\":\"%s\","
+		 "\"last_release\":{\"code\":\"%s\",\"at_ms\":%llu},"
+		 "\"first_fault\":%s}}",
+		 device_hex, boot_hex, session_json, (unsigned long long)status_seq,
+		 (unsigned long long)rt_monotonic_ms(), ble_health, session_health,
+		 host_health,
+		 audio.configured && audio.tx_stream_active && audio.clock_healthy &&
+				 audio.buffers_healthy && audio.converter_healthy ?
+			 "healthy" :
+			 "unhealthy",
+		 audio.configured ? "true" : "false",
+		 audio.tx_stream_active ? "active" : "inactive",
+		 audio.clock_healthy ? "healthy" : "unhealthy",
+		 audio.buffers_healthy ? "healthy" : "unhealthy",
+		 audio.converter_healthy ? "healthy" : "unhealthy", profile_health,
+		 observed_tx, snapshot.commanded_ptt ? "active" : "inactive", ptt_out,
+		 inhibit, safety_state, release_code,
+		 (unsigned long long)snapshot.last_release_at_ms, first_fault);
+	ssize_t result = bt_gatt_attr_read(conn, attr, buf, len, offset, status_value,
+					  strlen(status_value));
+	k_mutex_unlock(&ble_lock);
+	return result;
 }
 
 static int accept_fragment(const uint8_t *value, uint16_t length)
@@ -153,13 +269,22 @@ static int accept_fragment(const uint8_t *value, uint16_t length)
 		if (command_transfer.accepted != command_transfer.total) {
 			return -EINVAL;
 		}
-		/*
-		 * The checked-in Rust firmware core consumes this exact logical payload
-		 * in repository-vector tests. The hardware image deliberately has no
-		 * radio/PTT assertion path until #13; an NCS/Rust ABI is a later build
-		 * gate and cannot be replaced by raw CAT here.
-		 */
+		size_t response_length = 0;
 		command_transfer.active = false;
+		if (logical_handler == NULL) {
+			return -ENOSYS;
+		}
+		int err = logical_handler(command_transfer.bytes, command_transfer.total,
+					  logical_response, sizeof(logical_response),
+					  &response_length);
+		if (err != 0 || response_length == 0 ||
+		    response_length > sizeof(logical_response)) {
+			return err != 0 ? err : -EMSGSIZE;
+		}
+		err = rt_ble_publish_response(logical_response, response_length);
+		if (err != 0) {
+			rt_diag_record(RT_EVENT_PROTOCOL_FAULT, (uint32_t)-err);
+		}
 	}
 	rt_diag_record(RT_EVENT_PROTOCOL_FRAGMENT, payload);
 	return 0;
@@ -197,6 +322,72 @@ BT_GATT_SERVICE_DEFINE(
 			       BT_GATT_PERM_READ, read_status, NULL, NULL),
 	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE));
 
+struct response_transfer {
+	bool active;
+	uint32_t id;
+	uint32_t total;
+	uint32_t offset;
+	uint8_t logical[MAX_MESSAGE_BYTES];
+	uint8_t frame[517];
+	struct bt_gatt_indicate_params params;
+};
+
+static struct response_transfer response_transfer;
+static uint32_t next_response_transfer_id = 1;
+
+static int send_next_response_fragment(void);
+
+static void response_indicated(struct bt_conn *conn,
+			       struct bt_gatt_indicate_params *params, uint8_t err)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(params);
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	if (err != 0 || !response_transfer.active ||
+	    response_transfer.offset == response_transfer.total) {
+		response_transfer.active = false;
+	} else if (send_next_response_fragment() != 0) {
+		response_transfer.active = false;
+	}
+	k_mutex_unlock(&ble_lock);
+}
+
+static int send_next_response_fragment(void)
+{
+	uint16_t frame_limit =
+		MIN(MIN(command_value_limit, response_client_limit),
+		    sizeof(response_transfer.frame));
+	if (frame_limit <= FRAME_HEADER || current_conn == NULL) {
+		return -ENOTCONN;
+	}
+	uint16_t payload_limit = frame_limit - FRAME_HEADER;
+	uint16_t payload =
+		MIN(payload_limit, response_transfer.total - response_transfer.offset);
+	uint8_t flags = response_transfer.offset == 0 ? START_FLAG : 0;
+	if (response_transfer.offset + payload == response_transfer.total) {
+		flags |= END_FLAG;
+	}
+	response_transfer.frame[0] = 0;
+	response_transfer.frame[1] = flags;
+	sys_put_be16(0, &response_transfer.frame[2]);
+	sys_put_be32(response_transfer.id, &response_transfer.frame[4]);
+	sys_put_be32(response_transfer.total, &response_transfer.frame[8]);
+	sys_put_be32(response_transfer.offset, &response_transfer.frame[12]);
+	memcpy(&response_transfer.frame[FRAME_HEADER],
+	       &response_transfer.logical[response_transfer.offset], payload);
+	response_transfer.params = (struct bt_gatt_indicate_params){
+		.attr = &rt_service.attrs[6],
+		.func = response_indicated,
+		.data = response_transfer.frame,
+		.len = FRAME_HEADER + payload,
+	};
+	int result = bt_gatt_indicate(current_conn, &response_transfer.params);
+	if (result == 0) {
+		response_transfer.offset += payload;
+	}
+	return result;
+}
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err != 0) {
@@ -205,6 +396,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	current_conn = bt_conn_ref(conn);
 	command_value_limit = MAX(20, bt_gatt_get_mtu(conn) - 3);
+	response_client_limit = UINT16_MAX;
 	update_hello();
 	k_mutex_unlock(&ble_lock);
 	rt_diag_record(RT_EVENT_BLE_CONNECTED, command_value_limit);
@@ -220,9 +412,12 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		current_conn = NULL;
 	}
 	command_transfer.active = false;
+	response_transfer.active = false;
 	command_value_limit = 20;
+	response_client_limit = UINT16_MAX;
 	k_mutex_unlock(&ble_lock);
 	rt_diag_record(RT_EVENT_BLE_DISCONNECTED, reason);
+	rt_protocol_disconnect();
 	rt_safety_ble_disconnected();
 }
 
@@ -260,6 +455,8 @@ int rt_ble_service_init(void)
 	if (err != 0) {
 		return err;
 	}
+	rt_protocol_init(device_id, boot_id);
+	rt_ble_register_logical_handler(rt_protocol_handle_logical);
 	update_hello();
 	err = bt_enable(NULL);
 	if (err != 0) {
@@ -274,6 +471,13 @@ int rt_ble_service_init(void)
 			       NULL, 0);
 }
 
+void rt_ble_register_logical_handler(rt_ble_logical_handler_t handler)
+{
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	logical_handler = handler;
+	k_mutex_unlock(&ble_lock);
+}
+
 uint16_t rt_ble_command_value_limit(void)
 {
 	k_mutex_lock(&ble_lock, K_FOREVER);
@@ -282,16 +486,34 @@ uint16_t rt_ble_command_value_limit(void)
 	return value;
 }
 
+uint16_t rt_ble_set_response_frame_limit(uint16_t client_limit)
+{
+	k_mutex_lock(&ble_lock, K_FOREVER);
+	response_client_limit = MAX(20, client_limit);
+	uint16_t value = MIN(command_value_limit, response_client_limit);
+	k_mutex_unlock(&ble_lock);
+	return value;
+}
+
 int rt_ble_publish_response(const uint8_t *value, uint16_t length)
 {
-	struct bt_gatt_indicate_params params = {
-		.attr = &rt_service.attrs[6],
-		.data = value,
-		.len = length,
-	};
+	if (length == 0 || length > MAX_MESSAGE_BYTES) {
+		return -EMSGSIZE;
+	}
 	k_mutex_lock(&ble_lock, K_FOREVER);
-	int result = current_conn == NULL ? -ENOTCONN :
-					 bt_gatt_indicate(current_conn, &params);
+	if (response_transfer.active) {
+		k_mutex_unlock(&ble_lock);
+		return -EBUSY;
+	}
+	response_transfer.active = true;
+	response_transfer.id = next_response_transfer_id++;
+	response_transfer.total = length;
+	response_transfer.offset = 0;
+	memcpy(response_transfer.logical, value, length);
+	int result = send_next_response_fragment();
+	if (result != 0) {
+		response_transfer.active = false;
+	}
 	k_mutex_unlock(&ble_lock);
 	return result;
 }

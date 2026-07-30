@@ -1036,7 +1036,16 @@ impl Model {
         let op_id = event.get("op_id").and_then(Value::as_str);
         let seq = event.get("seq").and_then(Value::as_u64);
         let command = event.get("command").and_then(Value::as_object);
-        if op_id.is_none_or(|id| !is_hex_id(id))
+        let request_boot_id = event
+            .get("boot_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let request_session_id = event
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if (exact_bytes.is_some() && (request_boot_id.is_none() || request_session_id.is_none()))
+            || op_id.is_none_or(|id| !is_hex_id(id))
             || seq.is_none()
             || command
                 .and_then(|value| value.get("type"))
@@ -1049,22 +1058,14 @@ impl Model {
         }
         let op_id = op_id.expect("validated");
         let seq = seq.expect("validated");
-        if event
-            .get("boot_id")
-            .and_then(Value::as_str)
-            .unwrap_or(&self.boot_id)
-            != self.boot_id
-        {
+        let request_boot_id = request_boot_id.unwrap_or_else(|| self.boot_id.clone());
+        let request_session_id = request_session_id.or_else(|| self.session_id.clone());
+        if request_boot_id != self.boot_id {
             self.lockout("protocol_fault");
             self.last_result = Some(error("stale_boot", "lockout", false));
             return Ok(());
         }
-        if event
-            .get("session_id")
-            .and_then(Value::as_str)
-            .or(self.session_id.as_deref())
-            != self.session_id.as_deref()
-        {
+        if request_session_id.as_deref() != self.session_id.as_deref() {
             self.lockout("protocol_fault");
             self.last_result = Some(error("wrong_session", "lockout", false));
             return Ok(());
@@ -1090,16 +1091,42 @@ impl Model {
             return Ok(());
         }
         if self.next_seq > MAX_SESSION_OPERATIONS {
-            self.last_result = Some(error("session_exhausted", "none", false));
+            self.last_result = Some(response_envelope(
+                &request_boot_id,
+                request_session_id.as_deref().expect("active session"),
+                op_id,
+                seq,
+                self.now_ms,
+                self.next_seq,
+                error("session_exhausted", "none", false),
+            ));
             return Ok(());
         }
-        let response = self.execute_command(command.expect("validated"));
+        let accepted_at_ms = self.now_ms;
+        let response_body = self.execute_command(command.expect("validated"));
         if self.session_id.is_none() {
-            self.last_result = Some(response);
+            self.last_result = Some(response_envelope(
+                &request_boot_id,
+                request_session_id.as_deref().expect("active session"),
+                op_id,
+                seq,
+                accepted_at_ms,
+                self.next_seq,
+                response_body,
+            ));
             return Ok(());
         }
         self.seq_to_op.insert(seq, op_id.to_owned());
         self.next_seq += 1;
+        let response = response_envelope(
+            &request_boot_id,
+            request_session_id.as_deref().expect("active session"),
+            op_id,
+            seq,
+            accepted_at_ms,
+            self.next_seq,
+            response_body,
+        );
         self.cache.insert(
             op_id.to_owned(),
             CachedOperation {
@@ -1324,6 +1351,41 @@ fn error(code: &str, safety_effect: &str, radio_io_attempted: bool) -> Value {
             "radio_io_attempted": radio_io_attempted
         }
     })
+}
+
+fn response_envelope(
+    boot_id: &str,
+    session_id: &str,
+    op_id: &str,
+    seq: u64,
+    accepted_at_ms: u64,
+    next_seq: u64,
+    body: Value,
+) -> Value {
+    let mut response = Map::new();
+    response.insert("type".to_owned(), Value::String("response".to_owned()));
+    response.insert("v".to_owned(), json!({"major": 0, "minor": 0}));
+    response.insert("boot_id".to_owned(), Value::String(boot_id.to_owned()));
+    response.insert(
+        "session_id".to_owned(),
+        Value::String(session_id.to_owned()),
+    );
+    response.insert("op_id".to_owned(), Value::String(op_id.to_owned()));
+    response.insert("seq".to_owned(), Value::from(seq));
+    response.insert("accepted_at_ms".to_owned(), Value::from(accepted_at_ms));
+    response.insert("next_seq".to_owned(), Value::from(next_seq));
+    if let Some(object) = body.as_object() {
+        if let Some(ok) = object.get("ok") {
+            response.insert("ok".to_owned(), ok.clone());
+        }
+        if let Some(result) = object.get("result") {
+            response.insert("result".to_owned(), result.clone());
+        }
+        if let Some(error) = object.get("error") {
+            response.insert("error".to_owned(), error.clone());
+        }
+    }
+    Value::Object(response)
 }
 
 fn is_hex_id(value: &str) -> bool {

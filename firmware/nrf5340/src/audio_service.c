@@ -62,7 +62,8 @@ void rt_audio_capture_convert(const int32_t *stereo, int16_t *mono, size_t sampl
 {
 	for (size_t index = 0; index < samples; ++index) {
 		int32_t sample = CLAMP(stereo[index * 2], -8388608, 8388607);
-		int32_t rounded = sample >= 0 ? (sample + 128) >> 8 : (sample - 128) >> 8;
+		int32_t rounded =
+			sample >= 0 ? (sample + 128) >> 8 : -((-sample + 128) >> 8);
 		mono[index] = (int16_t)CLAMP(rounded, INT16_MIN, INT16_MAX);
 	}
 }

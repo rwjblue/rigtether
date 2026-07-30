@@ -59,7 +59,8 @@ mise run ci
   requests.
 
 `check_firmware.py`, reached through `mise run check`, independently confirms the five
-fixed BLE UUIDs, byte parity between the C and Rust copies of the canonical UAC1
+fixed BLE UUIDs, completed-message dispatch and response identity, safety-snapshot
+status rendering, byte parity between the C and Rust copies of the canonical UAC1
 descriptor, the disabled PTT board default, and the unimplemented conditional-MIDI
 boundary.
 
@@ -132,6 +133,11 @@ the value after reconnect. Capture fragment offsets, START/END flags, transfer I
 write responses, response indications, indication acknowledgements, and status
 notifications separately. An ATT write response or indication acknowledgement is
 delivery information only and must never be reported as extending a lease.
+
+Completed command transfers enter the logical handler before the response is framed.
+The response indication state machine retains each fragment until acknowledgement,
+but release and lockout transitions occur synchronously before response delivery and
+never wait for that acknowledgement.
 
 Disconnect, second-session replacement, malformed framing, and stopped BLE host
 processing must first request receive-safe release. Do not wait for a response,

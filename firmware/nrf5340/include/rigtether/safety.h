@@ -54,7 +54,9 @@ struct rt_safety_snapshot {
 	uint64_t lease_deadline_ms;
 	uint64_t continuous_started_ms;
 	enum rt_release_cause last_release;
+	uint64_t last_release_at_ms;
 	bool first_fault_present;
+	uint32_t first_fault_id;
 	enum rt_release_cause first_fault;
 	uint64_t first_fault_at_ms;
 };
@@ -64,6 +66,7 @@ void rt_safety_release(enum rt_release_cause cause, bool lockout);
 void rt_safety_ble_connected(void);
 void rt_safety_ble_disconnected(void);
 void rt_safety_session_replaced(void);
+void rt_safety_protocol_session_active(void);
 void rt_safety_protocol_fault(void);
 void rt_safety_update_inputs(const struct rt_safety_inputs *inputs);
 void rt_safety_snapshot(struct rt_safety_snapshot *snapshot);

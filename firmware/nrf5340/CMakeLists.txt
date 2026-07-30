@@ -12,6 +12,7 @@ target_sources(
     src/diagnostics.c
     src/main.c
     src/monotonic.c
+    src/protocol_service.c
     src/safety_service.c
     src/usb_descriptors.c
 )

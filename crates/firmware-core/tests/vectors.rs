@@ -166,6 +166,15 @@ fn exact_reassembled_bytes_drive_idempotency() {
     let mut model = Model::from_initial(ids, None).expect("initial state");
     let request = br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#;
     let first = model.handle_logical(request).expect("first request");
+    assert_eq!(first["type"], "response");
+    assert_eq!(first["v"], serde_json::json!({"major": 0, "minor": 0}));
+    assert_eq!(first["boot_id"], "11111111111111111111111111111111");
+    assert_eq!(first["session_id"], "44444444444444444444444444444444");
+    assert_eq!(first["op_id"], "00000000000000000000000000000001");
+    assert_eq!(first["seq"], 1);
+    assert_eq!(first["accepted_at_ms"], 0);
+    assert_eq!(first["next_seq"], 2);
+    assert_eq!(first["ok"], true);
     let status = model.protocol_status();
     assert_eq!(status["health"]["ble_link"], "connected");
     assert_eq!(status["health"]["protocol_session"], "active");
@@ -185,4 +194,20 @@ fn exact_reassembled_bytes_drive_idempotency() {
     assert_eq!(denial["error"]["code"], "altered_duplicate");
     assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
     assert_eq!(model.snapshot()["cached_operations"], 1);
+}
+
+#[test]
+fn raw_request_requires_explicit_session_identity() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    let request = br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","op_id":"00000000000000000000000000000001","seq":1,"command":{"type":"status_read"}}"#;
+    let denial = model
+        .handle_logical(request)
+        .expect("missing identity is a protocol denial");
+    assert_eq!(denial["error"]["code"], "malformed");
+    assert_eq!(denial["error"]["safety_effect"], "lockout");
+    assert_eq!(model.snapshot()["next_seq"], 1);
+    assert_eq!(model.snapshot()["cached_operations"], 0);
+    assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
 }

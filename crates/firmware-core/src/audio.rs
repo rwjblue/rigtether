@@ -74,7 +74,7 @@ pub const fn capture_left24_to_mono16(sample: i32) -> i16 {
     let rounded = if clamped >= 0 {
         (clamped + 128) >> 8
     } else {
-        (clamped - 128) >> 8
+        -((-clamped + 128) >> 8)
     };
     if rounded < i16::MIN as i32 {
         i16::MIN

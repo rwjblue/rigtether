@@ -21,6 +21,12 @@ fn exact_uac1_descriptor_and_conversion_are_fixed() {
     assert_eq!(playback_mono16_to_stereo24(32_767), [8_388_352; 2]);
     assert_eq!(capture_left24_to_mono16(8_388_607), 32_767);
     assert_eq!(capture_left24_to_mono16(-8_388_608), -32_768);
+    assert_eq!(capture_left24_to_mono16(256), 1);
+    assert_eq!(capture_left24_to_mono16(-256), -1);
+    assert_eq!(capture_left24_to_mono16(127), 0);
+    assert_eq!(capture_left24_to_mono16(-127), 0);
+    assert_eq!(capture_left24_to_mono16(128), 1);
+    assert_eq!(capture_left24_to_mono16(-128), -1);
 }
 
 #[test]
