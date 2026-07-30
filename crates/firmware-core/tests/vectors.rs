@@ -330,3 +330,67 @@ fn raw_request_requires_exact_version_and_known_envelope() {
     assert_eq!(denial["error"]["safety_effect"], "none");
     assert_eq!(model.snapshot()["safety_state"], "receive_safe");
 }
+
+#[test]
+fn radio_commands_ignore_unknown_optional_fields() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let commands = [
+        serde_json::json!({
+            "type": "radio_profile_select",
+            "profile": "kx3",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_identify",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_vfo_a_set",
+            "frequency_hz": 7_100_000,
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_session_normalize",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_firmware_read",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_vfo_a_read",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_operating_state_read",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_mode_read",
+            "future_extension": {"ignored": true}
+        }),
+        serde_json::json!({
+            "type": "radio_tx_state_read",
+            "future_extension": {"ignored": true}
+        }),
+    ];
+
+    for (index, command) in commands.into_iter().enumerate() {
+        let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+        let request = serde_json::json!({
+            "type": "request",
+            "v": {"major": 0, "minor": 0},
+            "boot_id": "11111111111111111111111111111111",
+            "session_id": "44444444444444444444444444444444",
+            "op_id": format!("{:032x}", index + 1),
+            "seq": 1,
+            "command": command
+        });
+        let encoded = serde_json::to_vec(&request).expect("encode request");
+        let response = model
+            .handle_logical(&encoded)
+            .expect("extension-bearing command");
+        assert_eq!(response["ok"], true, "{request}");
+    }
+}

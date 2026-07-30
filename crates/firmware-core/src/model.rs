@@ -974,7 +974,7 @@ impl Model {
         let Some(profile) = command.get("profile").and_then(Value::as_str) else {
             return error("invalid_argument", "none", false);
         };
-        if command.len() != 2 || !matches!(profile, "kx2" | "kx3") {
+        if !matches!(profile, "kx2" | "kx3") {
             return error("invalid_argument", "none", false);
         }
         self.release("profile_change", true);
@@ -994,10 +994,7 @@ impl Model {
         }))
     }
 
-    fn radio_identify(&mut self, command: &Map<String, Value>) -> Value {
-        if command.len() != 1 {
-            return error("invalid_argument", "none", false);
-        }
+    fn radio_identify(&mut self, _command: &Map<String, Value>) -> Value {
         let expected = if self.radio_profile == "kx2" { 1 } else { 2 };
         let observed = self
             .injected_identity_product_code
@@ -1028,7 +1025,7 @@ impl Model {
         let Some(frequency) = command.get("frequency_hz").and_then(Value::as_u64) else {
             return error("invalid_argument", "none", false);
         };
-        if command.len() != 2 || frequency > 99_999_999_999 {
+        if frequency > 99_999_999_999 {
             return error("invalid_argument", "none", false);
         }
         self.radio_io_count += 1;
@@ -1039,10 +1036,7 @@ impl Model {
         }))
     }
 
-    fn radio_read(&mut self, command_type: &str, command: &Map<String, Value>) -> Value {
-        if command.len() != 1 {
-            return error("invalid_argument", "none", false);
-        }
+    fn radio_read(&mut self, command_type: &str, _command: &Map<String, Value>) -> Value {
         self.radio_io_count += 1;
         let result = match command_type {
             "radio_session_normalize" => json!({

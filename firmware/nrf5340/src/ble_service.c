@@ -342,7 +342,9 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 	ARG_UNUSED(attr);
 	ARG_UNUSED(flags);
 	if (offset != 0 || len > command_value_limit) {
-		rt_safety_protocol_fault();
+		if (rt_protocol_session_active()) {
+			rt_safety_protocol_fault();
+		}
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
 	}
 	int result = accept_fragment(buf, len);

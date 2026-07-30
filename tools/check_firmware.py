@@ -242,6 +242,14 @@ for ble_boundary in (
     if ble_boundary not in ble_source:
         error(f"BLE snapshot/session transition boundary is missing: {ble_boundary}")
 
+write_command_body = re.search(
+    r"static ssize_t write_command\(.*?\n\}", ble_source, re.DOTALL
+)
+if write_command_body is None or (
+    "if (rt_protocol_session_active())" not in write_command_body.group()
+):
+    error("invalid pre-session ATT writes must not latch a protocol fault")
+
 disconnect_body = re.search(
     r"static void disconnected\(.*?\n\}", ble_source, re.DOTALL
 )
