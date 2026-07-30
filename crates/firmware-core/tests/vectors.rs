@@ -76,6 +76,7 @@ fn consumes_runtime_framing_vectors() {
             "offsets": frames.iter().map(|frame| u32::from_be_bytes(frame[12..16].try_into().expect("offset"))).collect::<Vec<_>>(),
             "round_trip": String::from_utf8(reassemble(
                 &frames,
+                usize::try_from(vector["frame_limit"].as_u64().expect("frame limit")).unwrap(),
                 usize::try_from(
                     vector["max_message_bytes"]
                         .as_u64()
@@ -121,6 +122,7 @@ fn consumes_malformed_framing_vectors() {
         }
         let error = reassemble(
             &frames,
+            usize::try_from(vector["frame_limit"].as_u64().expect("frame limit")).unwrap(),
             usize::try_from(vector["max_message_bytes"].as_u64().expect("message limit")).unwrap(),
         )
         .expect_err("malformed framing must fail");
@@ -138,7 +140,21 @@ fn rejects_zero_length_incoming_transfer() {
     let mut frame = vec![0_u8; 16];
     frame[1] = 0x03;
     frame[4..8].copy_from_slice(&1_u32.to_be_bytes());
-    assert_eq!(reassemble(&[frame], 1024), Err(FramingError::EmptyMessage));
+    assert_eq!(
+        reassemble(&[frame], 20, 1024),
+        Err(FramingError::EmptyMessage)
+    );
+}
+
+#[test]
+fn rejects_fragment_larger_than_negotiated_limit() {
+    let frame = fragment(b"12345", 21, 1, 1024)
+        .expect("valid source frame")
+        .remove(0);
+    assert_eq!(
+        reassemble(&[frame], 20, 1024),
+        Err(FramingError::FrameTooLarge)
+    );
 }
 
 #[test]
@@ -393,4 +409,33 @@ fn radio_commands_ignore_unknown_optional_fields() {
             .expect("extension-bearing command");
         assert_eq!(response["ok"], true, "{request}");
     }
+}
+
+#[test]
+fn deeply_nested_unknown_fields_are_accepted_stack_safely() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut extension = serde_json::json!(null);
+    for _ in 0..160 {
+        extension = serde_json::json!([extension]);
+    }
+    let request = serde_json::json!({
+        "type": "request",
+        "v": {"major": 0, "minor": 0},
+        "boot_id": "11111111111111111111111111111111",
+        "session_id": "44444444444444444444444444444444",
+        "op_id": "00000000000000000000000000000001",
+        "seq": 1,
+        "command": {
+            "type": "status_read",
+            "future_extension": extension
+        }
+    });
+    let encoded = serde_json::to_vec(&request).expect("encode nested request");
+    assert!(encoded.len() <= 1024);
+    let mut model = Model::from_initial(ids, None).expect("initial state");
+    let response = model
+        .handle_logical(&encoded)
+        .expect("stack-safe extension-bearing command");
+    assert_eq!(response["ok"], true);
 }

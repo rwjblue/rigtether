@@ -133,8 +133,10 @@ pub fn parse_object(raw: &[u8]) -> Result<Map<String, Value>, JsonError> {
         return Err(JsonError("negative zero".to_owned()));
     }
     let mut deserializer = serde_json::Deserializer::from_str(text);
-    let value = StrictValue::deserialize(&mut deserializer)
-        .map_err(|error| JsonError(error.to_string()))?;
+    deserializer.disable_recursion_limit();
+    let stack_safe = serde_stacker::Deserializer::new(&mut deserializer);
+    let value =
+        StrictValue::deserialize(stack_safe).map_err(|error| JsonError(error.to_string()))?;
     deserializer
         .end()
         .map_err(|error| JsonError(error.to_string()))?;

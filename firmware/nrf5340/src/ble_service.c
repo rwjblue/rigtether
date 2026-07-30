@@ -398,9 +398,12 @@ static void response_indicated(struct bt_conn *conn,
 {
 	ARG_UNUSED(conn);
 	ARG_UNUSED(params);
-	bool storage_fault = false;
+	bool delivery_fault = false;
 	k_mutex_lock(&ble_lock, K_FOREVER);
-	if (err != 0 || !response_transfer.active) {
+	if (err != 0) {
+		response_transfer.active = false;
+		delivery_fault = true;
+	} else if (!response_transfer.active) {
 		response_transfer.active = false;
 	} else if (response_transfer.offset == response_transfer.total) {
 		size_t queued_length = 0;
@@ -414,19 +417,25 @@ static void response_indicated(struct bt_conn *conn,
 			response_transfer.offset = 0;
 			if (send_next_response_fragment() != 0) {
 				response_transfer.active = false;
-				storage_fault = true;
+				delivery_fault = true;
 			}
 		} else {
 			response_transfer.active = false;
-			storage_fault = queued < 0;
+			delivery_fault = queued < 0;
 		}
 	} else if (send_next_response_fragment() != 0) {
 		response_transfer.active = false;
-		storage_fault = true;
+		delivery_fault = true;
 	}
 	k_mutex_unlock(&ble_lock);
-	if (storage_fault) {
+	if (delivery_fault) {
+		/*
+		 * Release before flash cleanup, then invalidate all response
+		 * authority so a later operation cannot overtake failed delivery.
+		 */
 		rt_safety_protocol_fault();
+		rt_protocol_disconnect();
+		(void)rt_response_queue_reset();
 	}
 }
 

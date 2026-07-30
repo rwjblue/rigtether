@@ -238,9 +238,23 @@ for ble_boundary in (
     "rt_protocol_session_active()",
     'snapshot.inputs.radio_profile == RT_HEALTH_VALIDATING',
     '!snapshot.inputs.inhibit_known ? "unknown"',
+    "rt_protocol_disconnect();",
 ):
     if ble_boundary not in ble_source:
         error(f"BLE snapshot/session transition boundary is missing: {ble_boundary}")
+
+indication_body = re.search(
+    r"static void response_indicated\(.*?\n\}", ble_source, re.DOTALL
+)
+if indication_body is None or not all(
+    boundary in indication_body.group()
+    for boundary in (
+        "rt_safety_protocol_fault();",
+        "rt_protocol_disconnect();",
+        "rt_response_queue_reset();",
+    )
+):
+    error("response indication faults must release and invalidate queued authority")
 
 write_command_body = re.search(
     r"static ssize_t write_command\(.*?\n\}", ble_source, re.DOTALL

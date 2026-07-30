@@ -19,6 +19,8 @@ pub enum FramingError {
     MissingStart,
     /// Fragment is shorter than the fixed envelope.
     ShortHeader,
+    /// Fragment exceeds the negotiated ATT characteristic-value limit.
+    FrameTooLarge,
     /// Framing version is not v0.
     UnsupportedVersion,
     /// Reserved flag bits were set.
@@ -53,6 +55,7 @@ impl FramingError {
             Self::MessageTooLarge => "message_too_large",
             Self::MissingStart => "missing_start",
             Self::ShortHeader => "short_header",
+            Self::FrameTooLarge => "frame_too_large",
             Self::UnsupportedVersion => "unsupported_framing_version",
             Self::UnknownFlags => "unknown_flags",
             Self::NonzeroReserved => "nonzero_reserved",
@@ -125,7 +128,14 @@ pub fn fragment(
 /// # Errors
 ///
 /// Returns the first stable envelope violation.
-pub fn reassemble(frames: &[Vec<u8>], max_message_bytes: usize) -> Result<Vec<u8>, FramingError> {
+pub fn reassemble(
+    frames: &[Vec<u8>],
+    frame_limit: usize,
+    max_message_bytes: usize,
+) -> Result<Vec<u8>, FramingError> {
+    if frame_limit < 20 {
+        return Err(FramingError::TransportLimitTooSmall);
+    }
     if frames.is_empty() {
         return Err(FramingError::MissingStart);
     }
@@ -141,6 +151,9 @@ pub fn reassemble(frames: &[Vec<u8>], max_message_bytes: usize) -> Result<Vec<u8
         }
         if frame.len() < HEADER_BYTES {
             return Err(FramingError::ShortHeader);
+        }
+        if frame.len() > frame_limit {
+            return Err(FramingError::FrameTooLarge);
         }
         let version = frame[0];
         let flags = frame[1];
