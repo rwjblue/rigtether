@@ -150,9 +150,34 @@ for protocol_boundary in (
     'strcmp(type, "radio_mode_read")',
     'strcmp(type, "radio_tx_state_read")',
     '\\"status_seq\\":%llu',
+    "rt_radio_execute_typed(&request, &outcome)",
+    "if (identity[index] != '0')",
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
+
+if "simulator_frequency_hz" in protocol_source:
+    error("nRF radio-disconnected image must not manufacture simulated CAT success")
+
+radio_source = (ROOT / "firmware/nrf5340/src/radio_service.c").read_text(
+    encoding="utf-8"
+)
+if 'outcome->error_code = "radio_disconnected"' not in radio_source:
+    error("nRF radio adapter must report its explicit disconnected fixture boundary")
+radio_code = re.sub(r"/\*.*?\*/|//[^\n]*", "", radio_source, flags=re.DOTALL)
+if "raw" in radio_code.lower():
+    error("nRF typed radio adapter must expose no raw CAT entry point")
+
+safety_source = (ROOT / "firmware/nrf5340/src/safety_service.c").read_text(
+    encoding="utf-8"
+)
+for reset_boundary in (
+    "hwinfo_get_reset_cause(&reset_cause)",
+    "reset_cause & RESET_WATCHDOG",
+    "initial_release = RT_RELEASE_WATCHDOG",
+):
+    if reset_boundary not in safety_source:
+        error(f"watchdog reset-cause diagnostic boundary is missing: {reset_boundary}")
 
 cache_source = (ROOT / "firmware/nrf5340/src/operation_cache.c").read_text(
     encoding="utf-8"

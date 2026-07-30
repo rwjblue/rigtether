@@ -10,6 +10,7 @@
 #include "rigtether/monotonic.h"
 #include "rigtether/operation_cache.h"
 #include "rigtether/protocol.h"
+#include "rigtether/radio.h"
 #include "rigtether/safety.h"
 
 #define MAX_LOGICAL_BYTES 1024
@@ -177,7 +178,6 @@ static char cached_client_nonce[33];
 static char cached_start_op_id[33];
 static char intent_identity[33];
 static char selected_profile[4] = "kx2";
-static uint64_t simulator_frequency_hz = 7100000;
 
 static void render_hex(char out[33], const uint8_t value[16])
 {
@@ -512,7 +512,12 @@ static int handle_session_start(char *json, size_t json_length,
 	const int64_t required = BIT_MASK(ARRAY_SIZE(session_start_descr));
 	if (parsed != required || strcmp(message.type, "session_start") != 0 ||
 	    !valid_id(message.client_nonce) || !valid_id(message.op_id)) {
-		int length = render_error("malformed", "none", rendered, sizeof(rendered));
+		if (session_active) {
+			rt_safety_protocol_fault();
+		}
+		int length = render_error("malformed",
+					  session_active ? "lockout" : "none",
+					  rendered, sizeof(rendered));
 		return length < 0 ? length :
 				   copy_response(rendered, response, response_capacity,
 						 response_length);
@@ -590,7 +595,8 @@ static int handle_session_start(char *json, size_t json_length,
 	rt_safety_protocol_session_active();
 	struct rt_safety_snapshot snapshot;
 	rt_safety_snapshot(&snapshot);
-	snapshot.inputs.radio_profile = RT_HEALTH_HEALTHY;
+	/* No CAT backend exists in the default radio-disconnected fixture. */
+	snapshot.inputs.radio_profile = RT_HEALTH_UNHEALTHY;
 	rt_safety_update_inputs(&snapshot.inputs);
 	uint16_t device_limit = rt_ble_command_value_limit();
 	uint16_t tx_limit =
@@ -632,6 +638,11 @@ static bool fault_id_value(const char *identity, uint32_t *value)
 	if (!valid_id(identity)) {
 		return false;
 	}
+	for (size_t index = 0; index < 24; ++index) {
+		if (identity[index] != '0') {
+			return false;
+		}
+	}
 	uint32_t parsed = 0;
 	for (size_t index = 24; index < 32; ++index) {
 		uint8_t digit = identity[index] <= '9' ? identity[index] - '0' :
@@ -640,6 +651,23 @@ static bool fault_id_value(const char *identity, uint32_t *value)
 	}
 	*value = parsed;
 	return true;
+}
+
+static void typed_radio_result(enum rt_radio_operation operation,
+			       uint64_t frequency_hz, char *body,
+			       size_t capacity)
+{
+	struct rt_radio_request request = {
+		.operation = operation,
+		.frequency_hz = frequency_hz,
+	};
+	struct rt_radio_outcome outcome;
+	int err = rt_radio_execute_typed(&request, &outcome);
+	if (err != 0) {
+		command_error(body, capacity, outcome.error_code, "none");
+		return;
+	}
+	snprintk(body, capacity, "%s", outcome.result_json);
 }
 
 static const char *acquire_precondition(void)
@@ -819,6 +847,9 @@ static void command_result(const char *type, char *json, size_t json_length,
 			snapshot.inputs.host_route = RT_HEALTH_UNKNOWN;
 			snapshot.inputs.radio_profile = RT_HEALTH_UNKNOWN;
 			rt_safety_update_inputs(&snapshot.inputs);
+			rt_radio_select_profile(strcmp(command.profile, "kx2") == 0 ?
+						       RT_RADIO_PROFILE_KX2 :
+						       RT_RADIO_PROFILE_KX3);
 			intent_identity[0] = '\0';
 			*invalidate_session = true;
 			snprintk(body, capacity,
@@ -829,26 +860,13 @@ static void command_result(const char *type, char *json, size_t json_length,
 				 selected_profile);
 		}
 	} else if (strcmp(type, "radio_session_normalize") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":"
-			 "\"radio_session_normalize\",\"auto_information\":\"off\","
-			 "\"k2_mode\":\"off\",\"k3_extended_mode\":\"off\"}");
+		typed_radio_result(RT_RADIO_NORMALIZE_SESSION, 0, body, capacity);
 	} else if (strcmp(type, "radio_identify") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":\"radio_identify\","
-			 "\"profile\":\"%s\",\"product_code\":%u,"
-			 "\"option_flags\":[\"a\",\"p\",\"f\",\"t\",\"b\",\"x\",\"i\"]}",
-			 selected_profile,
-			 strcmp(selected_profile, "kx2") == 0 ? 1U : 2U);
+		typed_radio_result(RT_RADIO_IDENTIFY, 0, body, capacity);
 	} else if (strcmp(type, "radio_firmware_read") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":\"radio_firmware_read\","
-			 "\"main\":\"03.14\",\"dsp\":null}");
+		typed_radio_result(RT_RADIO_READ_FIRMWARE, 0, body, capacity);
 	} else if (strcmp(type, "radio_vfo_a_read") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":\"radio_vfo_a_read\","
-			 "\"frequency_hz\":%llu}",
-			 (unsigned long long)simulator_frequency_hz);
+		typed_radio_result(RT_RADIO_READ_VFO_A, 0, body, capacity);
 	} else if (strcmp(type, "radio_vfo_a_set") == 0) {
 		struct frequency_command command = {0};
 		int64_t parsed = json_obj_parse(json, json_length,
@@ -859,27 +877,15 @@ static void command_result(const char *type, char *json, size_t json_length,
 		    command.frequency_hz > 99999999999ULL) {
 			command_error(body, capacity, "invalid_argument", "none");
 		} else {
-			simulator_frequency_hz = command.frequency_hz;
-			snprintk(body, capacity,
-				 "\"ok\":true,\"result\":{\"type\":"
-				 "\"radio_vfo_a_set\",\"frequency_hz\":%llu,"
-				 "\"query_verified\":true}",
-				 (unsigned long long)simulator_frequency_hz);
+			typed_radio_result(RT_RADIO_SET_VFO_A, command.frequency_hz,
+					   body, capacity);
 		}
 	} else if (strcmp(type, "radio_operating_state_read") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":"
-			 "\"radio_operating_state_read\",\"frequency_hz\":%llu,"
-			 "\"tx_state\":\"receive\"}",
-			 (unsigned long long)simulator_frequency_hz);
+		typed_radio_result(RT_RADIO_READ_OPERATING_STATE, 0, body, capacity);
 	} else if (strcmp(type, "radio_mode_read") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":\"radio_mode_read\","
-			 "\"mode\":\"lsb\"}");
+		typed_radio_result(RT_RADIO_READ_MODE, 0, body, capacity);
 	} else if (strcmp(type, "radio_tx_state_read") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":"
-			 "\"radio_tx_state_read\",\"tx_state\":\"receive\"}");
+		typed_radio_result(RT_RADIO_READ_TX_STATE, 0, body, capacity);
 	} else if (strcmp(type, "raw_cat") == 0 || strcmp(type, "TX") == 0 ||
 		   strcmp(type, "SWT") == 0 || strcmp(type, "SWH") == 0 ||
 		   strcmp(type, "KY") == 0 || strstr(type, "key") != NULL ||

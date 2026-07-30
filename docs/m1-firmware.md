@@ -58,6 +58,14 @@ mise run ci
 - typed CAT document fixtures plus pre-I/O rejection of raw and keying-capable
   requests.
 
+The checked-in nRF image exposes those exact typed radio operations through a
+radio-service adapter, but its default radio-disconnected fixture has no `RadioIo`
+backend and returns `radio_disconnected` without attempting I/O. It never manufactures
+KX2/KX3 identity, firmware, frequency, mode, or transmit-state results. Automated CAT
+success evidence comes only from the Rust firmware core bound to #9's
+document-derived transcript simulator; selecting and validating the nRF radio-side
+electrical backend remains #13 human-required work.
+
 `check_firmware.py`, reached through `mise run check`, independently confirms the five
 fixed BLE UUIDs, completed-message dispatch and response identity, safety-snapshot
 status rendering, byte parity between the C and Rust copies of the canonical UAC1
@@ -82,6 +90,8 @@ places output under `target/nrf5340`. The application configuration:
 - configures a dedicated 1 MHz application timer extended to 64 bits;
 - configures a nominal 250 ms hardware watchdog that continues in sleep and debug
   halt; only a complete safety-service check can feed it;
+- reads and clears the SoC reset cause before configuring the watchdog, preserving a
+  watchdog reset as the first boot diagnostic release reason;
 - keeps the normal safety cadence at 25 ms; and
 - keeps physical PTT output and bench fault injection disabled.
 

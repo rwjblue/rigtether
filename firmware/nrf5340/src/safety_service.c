@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <errno.h>
 #include <zephyr/device.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -241,6 +242,14 @@ K_THREAD_DEFINE(safety_thread_id, 2048, safety_thread, NULL, NULL, NULL, -2, 0,
 
 int rt_safety_init(void)
 {
+	uint32_t reset_cause = 0;
+	enum rt_release_cause initial_release = RT_RELEASE_BOOT_OR_UPDATE;
+	if (hwinfo_get_reset_cause(&reset_cause) == 0) {
+		if ((reset_cause & RESET_WATCHDOG) != 0U) {
+			initial_release = RT_RELEASE_WATCHDOG;
+		}
+		(void)hwinfo_clear_reset_cause();
+	}
 	state = (struct rt_safety_snapshot){
 		.state = RT_RECEIVE_SAFE,
 		.inputs = {
@@ -254,7 +263,7 @@ int rt_safety_init(void)
 			.ptt_out_active = false,
 		},
 		.commanded_ptt = false,
-		.last_release = RT_RELEASE_BOOT_OR_UPDATE,
+		.last_release = initial_release,
 		.last_release_at_ms = 0,
 	};
 	ptt_output_inactive();

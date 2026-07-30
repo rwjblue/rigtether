@@ -14,6 +14,7 @@ target_sources(
     src/monotonic.c
     src/operation_cache.c
     src/protocol_service.c
+    src/radio_service.c
     src/safety_service.c
     src/usb_descriptors.c
 )
