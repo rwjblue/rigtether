@@ -529,6 +529,76 @@ static int extract_top_level_type(const uint8_t *json, size_t length,
 	return -EINVAL;
 }
 
+#define MAX_EXACT_COMMAND_FIELDS 2
+
+static bool object_has_exact_keys(const uint8_t *json, size_t length,
+				  const char *const expected[],
+				  size_t expected_count)
+{
+	if (expected_count > MAX_EXACT_COMMAND_FIELDS) {
+		return false;
+	}
+	bool seen[MAX_EXACT_COMMAND_FIELDS] = {false};
+	size_t offset = 0;
+	size_t member_count = 0;
+	skip_whitespace(json, length, &offset);
+	if (offset >= length || json[offset++] != '{') {
+		return false;
+	}
+	while (offset < length) {
+		skip_whitespace(json, length, &offset);
+		if (offset < length && json[offset] == '}') {
+			offset++;
+			break;
+		}
+		size_t key_start;
+		size_t key_length;
+		if (string_bounds(json, length, &offset, &key_start, &key_length) != 0) {
+			return false;
+		}
+		size_t matched = expected_count;
+		for (size_t index = 0; index < expected_count; ++index) {
+			if (decoded_string_equals_ascii(json, key_start, key_length,
+							expected[index])) {
+				matched = index;
+				break;
+			}
+		}
+		if (matched == expected_count || seen[matched]) {
+			return false;
+		}
+		seen[matched] = true;
+		member_count++;
+		skip_whitespace(json, length, &offset);
+		if (offset >= length || json[offset++] != ':') {
+			return false;
+		}
+		if (skip_value(json, length, &offset) != 0) {
+			return false;
+		}
+		skip_whitespace(json, length, &offset);
+		if (offset < length && json[offset] == ',') {
+			offset++;
+			continue;
+		}
+		if (offset < length && json[offset] == '}') {
+			offset++;
+			break;
+		}
+		return false;
+	}
+	skip_whitespace(json, length, &offset);
+	if (offset != length || member_count != expected_count) {
+		return false;
+	}
+	for (size_t index = 0; index < expected_count; ++index) {
+		if (!seen[index]) {
+			return false;
+		}
+	}
+	return true;
+}
+
 struct key_slice {
 	size_t start;
 	size_t length;
@@ -1098,7 +1168,36 @@ static void command_result(const char *type, char *json, size_t json_length,
 			   bool *invalidate_session, uint64_t status_sequence,
 			   uint64_t accepted_at_ms)
 {
+	static const char *const type_only[] = {"type"};
+	static const char *const profile_fields[] = {"type", "profile"};
+	static const char *const frequency_fields[] = {"type", "frequency_hz"};
+	const char *const *expected_fields = NULL;
+	size_t expected_field_count = 0;
+
 	*invalidate_session = false;
+	if (strcmp(type, "radio_profile_select") == 0) {
+		expected_fields = profile_fields;
+		expected_field_count = ARRAY_SIZE(profile_fields);
+	} else if (strcmp(type, "radio_vfo_a_set") == 0) {
+		expected_fields = frequency_fields;
+		expected_field_count = ARRAY_SIZE(frequency_fields);
+	} else if (strcmp(type, "radio_session_normalize") == 0 ||
+		   strcmp(type, "radio_identify") == 0 ||
+		   strcmp(type, "radio_firmware_read") == 0 ||
+		   strcmp(type, "radio_vfo_a_read") == 0 ||
+		   strcmp(type, "radio_operating_state_read") == 0 ||
+		   strcmp(type, "radio_mode_read") == 0 ||
+		   strcmp(type, "radio_tx_state_read") == 0) {
+		expected_fields = type_only;
+		expected_field_count = ARRAY_SIZE(type_only);
+	}
+	if (expected_fields != NULL &&
+	    !object_has_exact_keys((const uint8_t *)json, json_length,
+				   expected_fields, expected_field_count)) {
+		command_error(body, capacity, "invalid_argument", "none");
+		return;
+	}
+
 	if (strcmp(type, "status_read") == 0) {
 		snprintk(body, capacity,
 			 "\"ok\":true,\"result\":{\"type\":\"status_read\","
@@ -1450,18 +1549,29 @@ static int handle_request(char *json, size_t json_length,
 	command_json[message.command.length] = '\0';
 	memcpy(command_fields_json, command_json, message.command.length + 1);
 	struct command_message command = {0};
+	uint64_t accepted_at_ms = rt_monotonic_ms();
 	parsed = json_obj_parse(command_json, message.command.length, command_descr,
 				ARRAY_SIZE(command_descr), &command);
 	if (parsed != BIT(0) || command.type == NULL) {
 		rt_safety_protocol_fault();
-		int length =
-			render_error("malformed", "lockout", rendered, sizeof(rendered));
-		return length < 0 ? length :
-				   copy_response(rendered, response, response_capacity,
-						 response_length);
+		int length = snprintk(
+			rendered, sizeof(rendered),
+			"{\"type\":\"response\",\"v\":{\"major\":0,\"minor\":0},"
+			"\"boot_id\":\"%s\",\"session_id\":\"%s\","
+			"\"op_id\":\"%s\",\"seq\":%llu,\"accepted_at_ms\":%llu,"
+			"\"next_seq\":%llu,\"ok\":false,\"error\":{"
+			"\"code\":\"malformed\",\"safety_effect\":\"lockout\","
+			"\"radio_io_attempted\":false}}",
+			boot_identity, session_identity, message.op_id,
+			(unsigned long long)message.seq,
+			(unsigned long long)accepted_at_ms,
+			(unsigned long long)next_seq);
+		return length < 0 || (size_t)length >= sizeof(rendered) ?
+			       -EMSGSIZE :
+			       copy_response(rendered, response, response_capacity,
+					     response_length);
 	}
 
-	uint64_t accepted_at_ms = rt_monotonic_ms();
 	bool invalidate_session;
 	command_result(command.type, command_fields_json, message.command.length,
 		       body, sizeof(body), &invalidate_session, status_sequence,

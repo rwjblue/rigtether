@@ -966,6 +966,29 @@ fn raw_request_requires_exact_version_and_known_envelope() {
         assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
     }
 
+    let mut model = Model::from_initial(ids.clone(), None).expect("initial state");
+    let malformed_command = model
+        .handle_logical(
+            br#"{"type":"request","v":{"major":0,"minor":0},"boot_id":"11111111111111111111111111111111","session_id":"44444444444444444444444444444444","op_id":"00000000000000000000000000000001","seq":1,"command":{}}"#,
+        )
+        .expect("correlatable malformed command");
+    assert_eq!(malformed_command["type"], "response");
+    assert_eq!(
+        malformed_command["boot_id"],
+        "11111111111111111111111111111111"
+    );
+    assert_eq!(
+        malformed_command["session_id"],
+        "44444444444444444444444444444444"
+    );
+    assert_eq!(
+        malformed_command["op_id"],
+        "00000000000000000000000000000001"
+    );
+    assert_eq!(malformed_command["seq"], 1);
+    assert_eq!(malformed_command["next_seq"], 1);
+    assert_eq!(malformed_command["error"]["code"], "malformed");
+
     let mut model = Model::from_initial(
         ids,
         Some(&serde_json::json!({

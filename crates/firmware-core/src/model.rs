@@ -1149,6 +1149,10 @@ impl Model {
             .get("session_id")
             .and_then(Value::as_str)
             .map(str::to_owned);
+        let command_valid = command
+            .and_then(|value| value.get("type"))
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty());
         if (exact_bytes.is_some() && (request_boot_id.is_none() || request_session_id.is_none()))
             || (exact_bytes.is_some() && event.get("v") != Some(&json!({"major": 0, "minor": 0})))
             || request_boot_id
@@ -1159,20 +1163,34 @@ impl Model {
                 .is_some_and(|identity| !is_hex_id(identity))
             || op_id.is_none_or(|id| !is_hex_id(id))
             || seq.is_none()
-            || command
-                .and_then(|value| value.get("type"))
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
+            || !command_valid
         {
             let active = self.session_id.is_some();
             if active {
                 self.lockout("protocol_fault");
             }
-            self.last_result = Some(error(
-                "malformed",
-                if active { "lockout" } else { "none" },
-                false,
-            ));
+            let body = error("malformed", if active { "lockout" } else { "none" }, false);
+            let identity_is_correlatable = exact_bytes.is_some()
+                && event.get("v") == Some(&json!({"major": 0, "minor": 0}))
+                && request_boot_id.as_deref().is_some_and(is_hex_id)
+                && request_session_id.as_deref().is_some_and(is_hex_id)
+                && op_id.is_some_and(is_hex_id)
+                && seq.is_some();
+            self.last_result = Some(if !command_valid && identity_is_correlatable {
+                response_envelope(
+                    request_boot_id.as_deref().expect("validated boot identity"),
+                    request_session_id
+                        .as_deref()
+                        .expect("validated session identity"),
+                    op_id.expect("validated operation identity"),
+                    seq.expect("validated sequence"),
+                    self.now_ms,
+                    self.next_seq,
+                    body,
+                )
+            } else {
+                body
+            });
             return Ok(());
         }
         let op_id = op_id.expect("validated");
