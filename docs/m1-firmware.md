@@ -181,7 +181,10 @@ response bytes for all 512 negotiated operations and erases only after receive-s
 session replacement. QSPI build, erase/write latency, power-fail behavior, and
 endurance remain measurement gates. A storage, integrity, or capacity fault ends the
 session receive-safely; cache eviction within the negotiated session is never a
-recovery strategy. The adjacent 2 MiB diagnostic partition is reserved but is not
+recovery strategy. A separate 1 MiB append-only response queue serializes later
+operation results behind an outstanding indication; queue backpressure returns an ATT
+resource error so a byte-exact retry can retrieve the cached result without repeating
+the transition. The adjacent 2 MiB diagnostic partition is reserved but is not
 claimed as persistent-log evidence.
 
 ## Fault injection

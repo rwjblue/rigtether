@@ -13,5 +13,10 @@
 			label = "rigtether-diagnostic-log";
 			reg = <0x400000 0x200000>;
 		};
+
+		response_queue_partition: partition@600000 {
+			label = "rigtether-response-queue";
+			reg = <0x600000 0x100000>;
+		};
 	};
 };

@@ -134,6 +134,20 @@ for protocol_boundary in (
     "rt_operation_cache_lookup(",
     "rt_operation_cache_store(",
     "rt_protocol_att_limit_changed",
+    'strcmp(type, "host_audio_route_report")',
+    'strcmp(type, "ptt_intent_begin")',
+    'strcmp(type, "ptt_acquire")',
+    'strcmp(type, "ptt_renew")',
+    'strcmp(type, "ptt_release")',
+    'strcmp(type, "safety_recover")',
+    'strcmp(type, "radio_session_normalize")',
+    'strcmp(type, "radio_identify")',
+    'strcmp(type, "radio_firmware_read")',
+    'strcmp(type, "radio_vfo_a_read")',
+    'strcmp(type, "radio_vfo_a_set")',
+    'strcmp(type, "radio_operating_state_read")',
+    'strcmp(type, "radio_mode_read")',
+    'strcmp(type, "radio_tx_state_read")',
 ):
     if protocol_boundary not in protocol_source:
         error(f"nRF protocol boundary is missing: {protocol_boundary}")
@@ -146,6 +160,8 @@ for cache_boundary in (
     "FIXED_PARTITION_ID(operation_cache_partition)",
     "flash_area_write(",
     "crc32_ieee(",
+    "rt_response_queue_enqueue(",
+    "rt_response_queue_dequeue(",
 ):
     if cache_boundary not in cache_source:
         error(f"external-QSPI operation cache boundary is missing: {cache_boundary}")
@@ -154,6 +170,8 @@ for ble_boundary in (
     "if (offset == 0)",
     "rt_ble_notify_status();",
     "rt_protocol_att_limit_changed();",
+    "BT_ATT_ERR_INSUFFICIENT_RESOURCES",
+    "command_transfer.accepted = 0",
 ):
     if ble_boundary not in ble_source:
         error(f"BLE snapshot/session transition boundary is missing: {ble_boundary}")

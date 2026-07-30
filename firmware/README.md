@@ -10,9 +10,10 @@ Two deliberately separate implementations live here:
   validates the 16-byte fragment envelope, dispatches completed logical messages,
   frames operation responses, renders status from the safety snapshot, exports the
   canonical UAC1 descriptor, retains all negotiated operation bytes in the selected
-  external-QSPI cache partition, provides mono16/stereo24 conversion, starts
-  receive-safe, and gives one safety service sole ownership of release, monotonic
-  timing, and watchdog feed.
+  external-QSPI cache partition, serializes queued indications, implements the
+  radio-disconnected typed-command fixture, provides mono16/stereo24 conversion,
+  starts receive-safe, and gives one safety service sole ownership of release,
+  monotonic timing, and watchdog feed.
 - [`rigtether-firmware-core`](../crates/firmware-core/README.md) is the host-neutral,
   radio-disconnected Rust simulator. It consumes every shared v0 scenario, runtime
   framing vector, strict-JSON rejection vector, and the typed CAT core/simulator from

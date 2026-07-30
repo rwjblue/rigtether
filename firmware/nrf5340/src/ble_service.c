@@ -15,6 +15,7 @@
 #include "rigtether/ble_service.h"
 #include "rigtether/diagnostics.h"
 #include "rigtether/monotonic.h"
+#include "rigtether/operation_cache.h"
 #include "rigtether/protocol.h"
 #include "rigtether/safety.h"
 
@@ -300,6 +301,7 @@ static int accept_fragment(const uint8_t *value, uint16_t length)
 		err = rt_ble_publish_response(logical_response, response_length);
 		if (err != 0) {
 			rt_diag_record(RT_EVENT_PROTOCOL_FAULT, (uint32_t)-err);
+			return -EAGAIN;
 		}
 		rt_ble_notify_status();
 	}
@@ -318,7 +320,15 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 		rt_safety_protocol_fault();
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
 	}
-	if (accept_fragment(buf, len) != 0) {
+	int result = accept_fragment(buf, len);
+	if (result == -EAGAIN) {
+		command_transfer.active = false;
+		command_transfer.accepted = 0;
+		return BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES);
+	}
+	if (result != 0) {
+		command_transfer.active = false;
+		command_transfer.accepted = 0;
 		rt_diag_record(RT_EVENT_PROTOCOL_FAULT, 0);
 		rt_safety_protocol_fault();
 		return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
@@ -359,14 +369,36 @@ static void response_indicated(struct bt_conn *conn,
 {
 	ARG_UNUSED(conn);
 	ARG_UNUSED(params);
+	bool storage_fault = false;
 	k_mutex_lock(&ble_lock, K_FOREVER);
-	if (err != 0 || !response_transfer.active ||
-	    response_transfer.offset == response_transfer.total) {
+	if (err != 0 || !response_transfer.active) {
 		response_transfer.active = false;
+	} else if (response_transfer.offset == response_transfer.total) {
+		size_t queued_length = 0;
+		int queued = rt_response_queue_dequeue(
+			response_transfer.logical,
+			sizeof(response_transfer.logical), &queued_length);
+		if (queued == 1) {
+			response_transfer.active = true;
+			response_transfer.id = next_response_transfer_id++;
+			response_transfer.total = queued_length;
+			response_transfer.offset = 0;
+			if (send_next_response_fragment() != 0) {
+				response_transfer.active = false;
+				storage_fault = true;
+			}
+		} else {
+			response_transfer.active = false;
+			storage_fault = queued < 0;
+		}
 	} else if (send_next_response_fragment() != 0) {
 		response_transfer.active = false;
+		storage_fault = true;
 	}
 	k_mutex_unlock(&ble_lock);
+	if (storage_fault) {
+		rt_safety_protocol_fault();
+	}
 }
 
 static int send_next_response_fragment(void)
@@ -434,6 +466,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	response_client_limit = UINT16_MAX;
 	k_mutex_unlock(&ble_lock);
 	rt_diag_record(RT_EVENT_BLE_DISCONNECTED, reason);
+	(void)rt_response_queue_reset();
 	rt_protocol_disconnect();
 	rt_safety_ble_disconnected();
 }
@@ -531,8 +564,9 @@ int rt_ble_publish_response(const uint8_t *value, uint16_t length)
 	}
 	k_mutex_lock(&ble_lock, K_FOREVER);
 	if (response_transfer.active) {
+		int queued = rt_response_queue_enqueue(value, length);
 		k_mutex_unlock(&ble_lock);
-		return -EBUSY;
+		return queued;
 	}
 	response_transfer.active = true;
 	response_transfer.id = next_response_transfer_id++;

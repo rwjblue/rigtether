@@ -46,6 +46,44 @@ struct command_message {
 	char *type;
 };
 
+struct health_command {
+	char *type;
+	char *health;
+};
+
+struct intent_command {
+	char *type;
+	char *intent_id;
+};
+
+struct lease_command {
+	char *type;
+	char *intent_id;
+	char *lease_id;
+	uint64_t requested_ms;
+};
+
+struct acquire_command {
+	char *type;
+	char *intent_id;
+	uint64_t requested_ms;
+};
+
+struct recover_command {
+	char *type;
+	char *fault_id;
+};
+
+struct profile_command {
+	char *type;
+	char *profile;
+};
+
+struct frequency_command {
+	char *type;
+	uint64_t frequency_hz;
+};
+
 static const struct json_obj_descr version_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct version, major, JSON_TOK_UINT64),
 	JSON_OBJ_DESCR_PRIM(struct version, minor, JSON_TOK_UINT64),
@@ -80,6 +118,44 @@ static const struct json_obj_descr command_descr[] = {
 	JSON_OBJ_DESCR_PRIM(struct command_message, type, JSON_TOK_STRING),
 };
 
+static const struct json_obj_descr health_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct health_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct health_command, health, JSON_TOK_STRING),
+};
+
+static const struct json_obj_descr intent_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct intent_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct intent_command, intent_id, JSON_TOK_STRING),
+};
+
+static const struct json_obj_descr lease_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct lease_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct lease_command, intent_id, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct lease_command, lease_id, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct lease_command, requested_ms, JSON_TOK_UINT64),
+};
+
+static const struct json_obj_descr acquire_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct acquire_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct acquire_command, intent_id, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct acquire_command, requested_ms, JSON_TOK_UINT64),
+};
+
+static const struct json_obj_descr recover_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct recover_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct recover_command, fault_id, JSON_TOK_STRING),
+};
+
+static const struct json_obj_descr profile_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct profile_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct profile_command, profile, JSON_TOK_STRING),
+};
+
+static const struct json_obj_descr frequency_command_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct frequency_command, type, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct frequency_command, frequency_hz, JSON_TOK_UINT64),
+};
+
 static const char *const capabilities[CAPABILITY_COUNT] = {
 	"first_cause_fault_v0",
 	"independent_health_v0",
@@ -99,6 +175,9 @@ static uint8_t cached_start_response[MAX_LOGICAL_BYTES];
 static size_t cached_start_response_length;
 static char cached_client_nonce[33];
 static char cached_start_op_id[33];
+static char intent_identity[33];
+static char selected_profile[4] = "kx2";
+static uint64_t simulator_frequency_hz = 7100000;
 
 static void render_hex(char out[33], const uint8_t value[16])
 {
@@ -378,7 +457,12 @@ static int handle_session_start(char *json, size_t json_length,
 	}
 	session_active = true;
 	next_seq = 1;
+	intent_identity[0] = '\0';
 	rt_safety_protocol_session_active();
+	struct rt_safety_snapshot snapshot;
+	rt_safety_snapshot(&snapshot);
+	snapshot.inputs.radio_profile = RT_HEALTH_HEALTHY;
+	rt_safety_update_inputs(&snapshot.inputs);
 	uint16_t device_limit = rt_ble_command_value_limit();
 	uint16_t tx_limit =
 		rt_ble_set_response_frame_limit(message.client_rx_frame_limit);
@@ -405,39 +489,275 @@ static int handle_session_start(char *json, size_t json_length,
 	return copy_response(rendered, response, response_capacity, response_length);
 }
 
-static const char *command_result(const char *type, char *body, size_t capacity)
+static void command_error(char *body, size_t capacity, const char *code,
+			  const char *effect)
 {
+	snprintk(body, capacity,
+		 "\"ok\":false,\"error\":{\"code\":\"%s\","
+		 "\"safety_effect\":\"%s\",\"radio_io_attempted\":false}",
+		 code, effect);
+}
+
+static bool fault_id_value(const char *identity, uint32_t *value)
+{
+	if (!valid_id(identity)) {
+		return false;
+	}
+	uint32_t parsed = 0;
+	for (size_t index = 24; index < 32; ++index) {
+		uint8_t digit = identity[index] <= '9' ? identity[index] - '0' :
+						      identity[index] - 'a' + 10;
+		parsed = (parsed << 4) | digit;
+	}
+	*value = parsed;
+	return true;
+}
+
+static const char *acquire_precondition(void)
+{
+	struct rt_safety_snapshot snapshot;
+	rt_safety_snapshot(&snapshot);
+	if (snapshot.state == RT_FAULT_LOCKOUT) {
+		return "fault_lockout";
+	}
+	if (snapshot.inputs.host_route != RT_HEALTH_HEALTHY) {
+		return "host_route_unhealthy";
+	}
+	if (snapshot.inputs.device_audio != RT_HEALTH_HEALTHY) {
+		return "device_audio_unhealthy";
+	}
+	if (snapshot.inputs.ble != RT_HEALTH_HEALTHY ||
+	    snapshot.inputs.protocol_session != RT_HEALTH_HEALTHY) {
+		return "control_unhealthy";
+	}
+	if (snapshot.inputs.radio_profile != RT_HEALTH_HEALTHY) {
+		return "profile_not_ready";
+	}
+	if (!snapshot.inputs.inhibit_closed) {
+		return "inhibit_open";
+	}
+	if (!snapshot.inputs.ptt_out_known || snapshot.inputs.ptt_out_active) {
+		return "ptt_out_not_inactive";
+	}
+	return "profile_not_ready";
+}
+
+static void command_result(const char *type, char *json, size_t json_length,
+			   char *body, size_t capacity,
+			   bool *invalidate_session)
+{
+	*invalidate_session = false;
 	if (strcmp(type, "status_read") == 0) {
 		snprintk(body, capacity,
 			 "\"ok\":true,\"result\":{\"type\":\"status_read\"}");
-	} else if (strcmp(type, "ptt_release") == 0) {
-		rt_safety_release(RT_RELEASE_OPERATOR, false);
+	} else if (strcmp(type, "host_audio_route_report") == 0) {
+		struct health_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						health_command_descr,
+						ARRAY_SIZE(health_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(health_command_descr)) ||
+		    (strcmp(command.health, "healthy") != 0 &&
+		     strcmp(command.health, "unhealthy") != 0 &&
+		     strcmp(command.health, "unknown") != 0)) {
+			command_error(body, capacity, "invalid_argument", "none");
+			return;
+		}
+		struct rt_safety_snapshot snapshot;
+		rt_safety_snapshot(&snapshot);
+		snapshot.inputs.host_route =
+			strcmp(command.health, "healthy") == 0 ? RT_HEALTH_HEALTHY :
+			strcmp(command.health, "unhealthy") == 0 ?
+				RT_HEALTH_UNHEALTHY :
+				RT_HEALTH_UNKNOWN;
+		rt_safety_update_inputs(&snapshot.inputs);
 		snprintk(body, capacity,
-			 "\"ok\":true,\"result\":{\"type\":\"ptt_release\","
-			 "\"released\":true}");
+			 "\"ok\":true,\"result\":{\"type\":"
+			 "\"host_audio_route_report\",\"health\":\"%s\"}",
+			 command.health);
+	} else if (strcmp(type, "ptt_intent_begin") == 0) {
+		struct intent_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						intent_command_descr,
+						ARRAY_SIZE(intent_command_descr),
+						&command);
+		struct rt_safety_snapshot snapshot;
+		rt_safety_snapshot(&snapshot);
+		if (parsed != BIT_MASK(ARRAY_SIZE(intent_command_descr)) ||
+		    !valid_id(command.intent_id)) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else if (snapshot.state == RT_FAULT_LOCKOUT) {
+			command_error(body, capacity, "fault_lockout", "none");
+		} else if (intent_identity[0] != '\0') {
+			command_error(body, capacity, "intent_active", "none");
+		} else {
+			strcpy(intent_identity, command.intent_id);
+			snprintk(body, capacity,
+				 "\"ok\":true,\"result\":{\"type\":"
+				 "\"ptt_intent_begin\",\"intent_id\":\"%s\"}",
+				 intent_identity);
+		}
+	} else if (strcmp(type, "ptt_acquire") == 0) {
+		struct acquire_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						acquire_command_descr,
+						ARRAY_SIZE(acquire_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(acquire_command_descr)) ||
+		    !valid_id(command.intent_id) || command.requested_ms == 0 ||
+		    command.requested_ms > 500) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else if (intent_identity[0] == '\0' ||
+			   strcmp(intent_identity, command.intent_id) != 0) {
+			command_error(body, capacity, "intent_required", "none");
+		} else {
+			command_error(body, capacity, acquire_precondition(), "none");
+		}
+	} else if (strcmp(type, "ptt_renew") == 0) {
+		struct lease_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						lease_command_descr,
+						ARRAY_SIZE(lease_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(lease_command_descr)) ||
+		    !valid_id(command.intent_id) || !valid_id(command.lease_id) ||
+		    command.requested_ms == 0 || command.requested_ms > 500) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else {
+			command_error(body, capacity, "lease_not_found", "none");
+		}
+	} else if (strcmp(type, "ptt_release") == 0) {
+		struct intent_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						intent_command_descr,
+						ARRAY_SIZE(intent_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(intent_command_descr)) ||
+		    !valid_id(command.intent_id)) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else if (intent_identity[0] != '\0' &&
+			   strcmp(intent_identity, command.intent_id) != 0) {
+			command_error(body, capacity, "intent_required", "none");
+		} else {
+			rt_safety_release(RT_RELEASE_OPERATOR, false);
+			intent_identity[0] = '\0';
+			snprintk(body, capacity,
+				 "\"ok\":true,\"result\":{\"type\":\"ptt_release\","
+				 "\"released\":true}");
+		}
+	} else if (strcmp(type, "safety_recover") == 0) {
+		struct recover_command command = {0};
+		uint32_t fault_id;
+		int64_t parsed = json_obj_parse(json, json_length,
+						recover_command_descr,
+						ARRAY_SIZE(recover_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(recover_command_descr)) ||
+		    !fault_id_value(command.fault_id, &fault_id)) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else {
+			enum rt_recovery_result recovery = rt_safety_recover(fault_id);
+			const char *code =
+				recovery == RT_RECOVERY_NOT_LOCKED ? "fault_lockout" :
+				recovery == RT_RECOVERY_WRONG_FAULT ? "wrong_fault" :
+				"rearm_incomplete";
+			if (recovery == RT_RECOVERY_OK) {
+				snprintk(body, capacity,
+					 "\"ok\":true,\"result\":{\"type\":"
+					 "\"safety_recover\",\"recovered\":true}");
+			} else {
+				command_error(body, capacity, code, "none");
+			}
+		}
+	} else if (strcmp(type, "radio_profile_select") == 0) {
+		struct profile_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						profile_command_descr,
+						ARRAY_SIZE(profile_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(profile_command_descr)) ||
+		    (strcmp(command.profile, "kx2") != 0 &&
+		     strcmp(command.profile, "kx3") != 0)) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else {
+			strcpy(selected_profile, command.profile);
+			rt_safety_release(RT_RELEASE_PROFILE, false);
+			struct rt_safety_snapshot snapshot;
+			rt_safety_snapshot(&snapshot);
+			snapshot.inputs.protocol_session = RT_HEALTH_UNKNOWN;
+			snapshot.inputs.host_route = RT_HEALTH_UNKNOWN;
+			snapshot.inputs.radio_profile = RT_HEALTH_UNKNOWN;
+			rt_safety_update_inputs(&snapshot.inputs);
+			intent_identity[0] = '\0';
+			*invalidate_session = true;
+			snprintk(body, capacity,
+				 "\"ok\":true,\"result\":{\"type\":"
+				 "\"radio_profile_select\",\"profile\":\"%s\","
+				 "\"state\":\"validating\","
+				 "\"session_invalidated\":true}",
+				 selected_profile);
+		}
+	} else if (strcmp(type, "radio_session_normalize") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":"
+			 "\"radio_session_normalize\",\"auto_information\":\"off\","
+			 "\"k2_mode\":\"off\",\"k3_extended_mode\":\"off\"}");
+	} else if (strcmp(type, "radio_identify") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":\"radio_identify\","
+			 "\"profile\":\"%s\",\"product_code\":%u,"
+			 "\"option_flags\":[\"a\",\"p\",\"f\",\"t\",\"b\",\"x\",\"i\"]}",
+			 selected_profile,
+			 strcmp(selected_profile, "kx2") == 0 ? 1U : 2U);
+	} else if (strcmp(type, "radio_firmware_read") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":\"radio_firmware_read\","
+			 "\"main\":\"03.14\",\"dsp\":null}");
+	} else if (strcmp(type, "radio_vfo_a_read") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":\"radio_vfo_a_read\","
+			 "\"frequency_hz\":%llu}",
+			 (unsigned long long)simulator_frequency_hz);
+	} else if (strcmp(type, "radio_vfo_a_set") == 0) {
+		struct frequency_command command = {0};
+		int64_t parsed = json_obj_parse(json, json_length,
+						frequency_command_descr,
+						ARRAY_SIZE(frequency_command_descr),
+						&command);
+		if (parsed != BIT_MASK(ARRAY_SIZE(frequency_command_descr)) ||
+		    command.frequency_hz > 99999999999ULL) {
+			command_error(body, capacity, "invalid_argument", "none");
+		} else {
+			simulator_frequency_hz = command.frequency_hz;
+			snprintk(body, capacity,
+				 "\"ok\":true,\"result\":{\"type\":"
+				 "\"radio_vfo_a_set\",\"frequency_hz\":%llu,"
+				 "\"query_verified\":true}",
+				 (unsigned long long)simulator_frequency_hz);
+		}
+	} else if (strcmp(type, "radio_operating_state_read") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":"
+			 "\"radio_operating_state_read\",\"frequency_hz\":%llu,"
+			 "\"tx_state\":\"receive\"}",
+			 (unsigned long long)simulator_frequency_hz);
+	} else if (strcmp(type, "radio_mode_read") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":\"radio_mode_read\","
+			 "\"mode\":\"lsb\"}");
+	} else if (strcmp(type, "radio_tx_state_read") == 0) {
+		snprintk(body, capacity,
+			 "\"ok\":true,\"result\":{\"type\":"
+			 "\"radio_tx_state_read\",\"tx_state\":\"receive\"}");
 	} else if (strcmp(type, "raw_cat") == 0 || strcmp(type, "TX") == 0 ||
 		   strcmp(type, "SWT") == 0 || strcmp(type, "SWH") == 0 ||
 		   strcmp(type, "KY") == 0 || strstr(type, "key") != NULL ||
-		   strstr(type, "tune") != NULL || strstr(type, "xmit") != NULL) {
-		snprintk(body, capacity,
-			 "\"ok\":false,\"error\":{\"code\":"
-			 "\"unsupported_radio_operation\",\"safety_effect\":\"none\","
-			 "\"radio_io_attempted\":false}");
-	} else if (strncmp(type, "radio_", 6) == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":false,\"error\":{\"code\":\"radio_control_fault\","
-			 "\"safety_effect\":\"none\",\"radio_io_attempted\":false}");
-	} else if (strcmp(type, "ptt_acquire") == 0 ||
-		   strcmp(type, "ptt_renew") == 0) {
-		snprintk(body, capacity,
-			 "\"ok\":false,\"error\":{\"code\":\"inhibit_open\","
-			 "\"safety_effect\":\"none\",\"radio_io_attempted\":false}");
+		   strstr(type, "tune") != NULL || strstr(type, "xmit") != NULL ||
+		   strncmp(type, "radio_", 6) == 0) {
+		command_error(body, capacity, "unsupported_radio_operation", "none");
 	} else {
-		snprintk(body, capacity,
-			 "\"ok\":false,\"error\":{\"code\":\"unsupported_command\","
-			 "\"safety_effect\":\"none\",\"radio_io_attempted\":false}");
+		command_error(body, capacity, "unsupported_command", "none");
 	}
-	return body;
 }
 
 static int handle_request(char *json, size_t json_length,
@@ -447,7 +767,8 @@ static int handle_request(char *json, size_t json_length,
 	struct request_message message = {0};
 	char rendered[MAX_LOGICAL_BYTES];
 	char command_json[MAX_LOGICAL_BYTES];
-	char body[320];
+	char command_fields_json[MAX_LOGICAL_BYTES];
+	char body[640];
 	int64_t parsed = json_obj_parse(json, json_length, request_descr,
 					ARRAY_SIZE(request_descr), &message);
 	const int64_t required = BIT_MASK(ARRAY_SIZE(request_descr));
@@ -523,6 +844,7 @@ static int handle_request(char *json, size_t json_length,
 	}
 	memcpy(command_json, message.command.start, message.command.length);
 	command_json[message.command.length] = '\0';
+	memcpy(command_fields_json, command_json, message.command.length + 1);
 	struct command_message command = {0};
 	parsed = json_obj_parse(command_json, message.command.length, command_descr,
 				ARRAY_SIZE(command_descr), &command);
@@ -536,7 +858,9 @@ static int handle_request(char *json, size_t json_length,
 	}
 
 	uint64_t accepted_at_ms = rt_monotonic_ms();
-	command_result(command.type, body, sizeof(body));
+	bool invalidate_session;
+	command_result(command.type, command_fields_json, message.command.length,
+		       body, sizeof(body), &invalidate_session);
 	uint64_t response_next_seq = next_seq + 1;
 	int length = snprintk(
 		rendered, sizeof(rendered),
@@ -564,6 +888,11 @@ static int handle_request(char *json, size_t json_length,
 					     response_length);
 	}
 	next_seq = response_next_seq;
+	if (invalidate_session) {
+		session_active = false;
+		session_identity[0] = '\0';
+		next_seq = 1;
+	}
 	return copy_response(rendered, response, response_capacity, response_length);
 }
 

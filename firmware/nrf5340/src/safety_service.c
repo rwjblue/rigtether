@@ -164,6 +164,28 @@ void rt_safety_snapshot(struct rt_safety_snapshot *snapshot)
 	k_mutex_unlock(&safety_lock);
 }
 
+enum rt_recovery_result rt_safety_recover(uint32_t fault_id)
+{
+	enum rt_recovery_result result;
+	k_mutex_lock(&safety_lock, K_FOREVER);
+	if (state.state != RT_FAULT_LOCKOUT) {
+		result = RT_RECOVERY_NOT_LOCKED;
+	} else if (!state.first_fault_present || state.first_fault_id != fault_id) {
+		result = RT_RECOVERY_WRONG_FAULT;
+	} else if (!inputs_allow_receive_safe()) {
+		result = RT_RECOVERY_INCOMPLETE;
+	} else {
+		state.state = RT_RECEIVE_SAFE;
+		state.first_fault_present = false;
+		state.first_fault_id = 0;
+		state.first_fault_at_ms = 0;
+		result = RT_RECOVERY_OK;
+	}
+	k_mutex_unlock(&safety_lock);
+	status_changed();
+	return result;
+}
+
 bool rt_safety_complete_check_and_feed_watchdog(void)
 {
 	bool complete = false;

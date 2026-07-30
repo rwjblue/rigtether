@@ -22,5 +22,10 @@ int rt_operation_cache_store(const char *op_id, uint64_t seq,
 			     const uint8_t *request, size_t request_length,
 			     const uint8_t *response, size_t response_length);
 size_t rt_operation_cache_count(void);
+int rt_response_queue_reset(void);
+int rt_response_queue_enqueue(const uint8_t *response, size_t response_length);
+int rt_response_queue_dequeue(uint8_t *response, size_t response_capacity,
+			      size_t *response_length);
+size_t rt_response_queue_count(void);
 
 #endif

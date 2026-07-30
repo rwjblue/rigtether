@@ -35,6 +35,13 @@ enum rt_release_cause {
 	RT_RELEASE_WATCHDOG,
 };
 
+enum rt_recovery_result {
+	RT_RECOVERY_OK,
+	RT_RECOVERY_NOT_LOCKED,
+	RT_RECOVERY_WRONG_FAULT,
+	RT_RECOVERY_INCOMPLETE,
+};
+
 struct rt_safety_inputs {
 	enum rt_health_state host_route;
 	enum rt_health_state device_audio;
@@ -70,6 +77,7 @@ void rt_safety_protocol_session_active(void);
 void rt_safety_protocol_fault(void);
 void rt_safety_update_inputs(const struct rt_safety_inputs *inputs);
 void rt_safety_snapshot(struct rt_safety_snapshot *snapshot);
+enum rt_recovery_result rt_safety_recover(uint32_t fault_id);
 bool rt_safety_complete_check_and_feed_watchdog(void);
 
 #endif

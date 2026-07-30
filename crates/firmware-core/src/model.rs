@@ -579,6 +579,10 @@ impl Model {
         event: &Map<String, Value>,
         exact_bytes: Option<&[u8]>,
     ) -> Result<(), String> {
+        if exact_bytes.is_some() && event.get("boot_id").and_then(Value::as_str).is_none() {
+            self.last_result = Some(error("malformed", "none", false));
+            return Ok(());
+        }
         let request_bytes = if let Some(bytes) = exact_bytes {
             bytes.to_vec()
         } else {

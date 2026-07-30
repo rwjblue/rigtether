@@ -211,3 +211,18 @@ fn raw_request_requires_explicit_session_identity() {
     assert_eq!(model.snapshot()["cached_operations"], 0);
     assert_eq!(model.snapshot()["safety_state"], "fault_lockout");
 }
+
+#[test]
+fn raw_session_start_requires_explicit_boot_identity() {
+    let vectors = vectors();
+    let ids = VectorIds::from_value(&vectors["ids"]).expect("valid ids");
+    let mut model = Model::from_initial(ids, Some(&serde_json::json!({"session": false})))
+        .expect("initial state");
+    let start = br#"{"type":"session_start","client_nonce":"22222222222222222222222222222222","op_id":"33333333333333333333333333333333","select":{"major":0,"minor":0},"required_capabilities":["first_cause_fault_v0","independent_health_v0","ordered_operations","ptt_leases_v0","typed_radio_v0"],"client_rx_frame_limit":185,"client_max_message_bytes":4096}"#;
+    let denial = model
+        .handle_logical(start)
+        .expect("missing boot identity is a protocol denial");
+    assert_eq!(denial["error"]["code"], "malformed");
+    assert_eq!(denial["error"]["safety_effect"], "none");
+    assert_eq!(model.snapshot()["session_id"], Value::Null);
+}
